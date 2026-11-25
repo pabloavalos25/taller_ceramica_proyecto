@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import {syncFeeTiers} from '../fees/sync-tiers.mjs';
 export class StudentListError extends Error { constructor(code, message) { super(message); this.code = code; } }
 
 export async function listStudents(pool, { actorToken, search = '', status = 'ALL', weekday = null, economic = 'ALL', branch = 'ALL', limit = 50, offset = 0 }) {
@@ -7,9 +8,13 @@ export async function listStudents(pool, { actorToken, search = '', status = 'AL
   const tokenHash = createHash('sha256').update(actorToken).digest('hex');
   const client = await pool.connect();
   try {
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    await client.query('BEGIN');
     const actor = await client.query("SELECT u.id FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.role='ADMIN' AND NOT u.must_change_password", [tokenHash]);
     if (!actor.rowCount) throw new StudentListError('FORBIDDEN', 'Operación no autorizada');
+    await syncFeeTiers(client);
+    await client.query('COMMIT');await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const verified=await client.query("SELECT u.id FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.role='ADMIN' AND NOT u.must_change_password",[tokenHash]);
+    if(!verified.rowCount)throw new StudentListError('FORBIDDEN','Operación no autorizada');
     const result = await client.query(`
       WITH summaries AS (
         SELECT p.user_id AS id, p.full_name, u.email, p.active, p.branch,

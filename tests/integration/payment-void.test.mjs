@@ -14,8 +14,9 @@ test('voiding a payment restores balance and preserves the audited payment', asy
   await root.query(`CREATE SCHEMA "${schema}"`);
   const pool = new pg.Pool({ connectionString: url, options: `-c search_path=${schema}` });
   try {
-    for (const file of ['001_initial.sql','002_student_status_history.sql','003_financial_foundation.sql','004_payment_idempotency.sql','005_payment_void.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
-    const admin = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('admin@example.com','hash','ADMIN') RETURNING id")).rows[0].id;
+    for (const file of ['001_initial.sql','002_student_status_history.sql','003_financial_foundation.sql','004_payment_idempotency.sql','005_payment_void.sql','015_fee_adjustments.sql','024_fee_tier_schedules.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
+    await pool.query('DELETE FROM fee_tier_rules');await pool.query('DELETE FROM fee_tier_schedules');
+  const admin = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('admin@example.com','hash','ADMIN') RETURNING id")).rows[0].id;
     const student = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('student@example.com','hash','USER') RETURNING id")).rows[0].id;
     await pool.query("INSERT INTO student_profiles(user_id,full_name,enrolled_on) VALUES ($1,'Ana','2026-11-25')", [student]);
     const charge = (await pool.query("INSERT INTO charges(student_id,category,amount_cents,description) VALUES ($1,'KILN',10000,'Pieza') RETURNING id", [student])).rows[0].id;

@@ -1,5 +1,6 @@
 ﻿import { periodsBetween } from './periods.mjs';
 import { generatePeriod } from './generate.mjs';
+import {reconcileTierFees} from './sync-tiers.mjs';
 
 // Caller is a trusted scheduler; never expose without administrator authorization.
 export async function runGeneration(pool, startPeriod) {
@@ -7,5 +8,6 @@ export async function runGeneration(pool, startPeriod) {
   const periods=periodsBetween(startPeriod,current);
   const result=[];
   for(const period of periods) result.push(await generatePeriod(pool,period));
+  await reconcileTierFees(pool);
   return result;
 }

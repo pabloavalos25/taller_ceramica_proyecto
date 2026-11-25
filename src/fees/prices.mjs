@@ -17,6 +17,8 @@ export async function setFeePrice(pool, { actorToken, mode, amountCents }) {
     await client.query('BEGIN');
     const actorId = await actor(client,hash,true);
     if (!(await client.query('SELECT id FROM fee_price_lock WHERE id=true FOR UPDATE')).rowCount) throw new Error('Falta bloqueo de configuración de cuotas');
+    const tiered=(await client.query("SELECT EXISTS(SELECT 1 FROM fee_tier_schedules WHERE effective_period <= (date_trunc('month',statement_timestamp() AT TIME ZONE 'America/Argentina/Buenos_Aires') + ($1::integer * interval '1 month'))::date) AS active",[mode==='INITIAL'?0:1])).rows[0].active;
+    if(tiered)throw new FeePriceError('TIERS','Configurá los importes desde la sección de tramos.');
     const existing = await client.query('SELECT EXISTS(SELECT 1 FROM fee_price_history) AS configured, EXISTS(SELECT 1 FROM monthly_fees) AS has_fees');
     if ((mode === 'INITIAL' && (existing.rows[0].configured || existing.rows[0].has_fees)) || (mode === 'SCHEDULE' && !existing.rows[0].configured)) throw new FeePriceError('INITIAL','Configuración inicial no disponible o pendiente');
     await client.query("INSERT INTO fee_price_history(effective_period,amount_cents,actor_id) VALUES ((date_trunc('month',statement_timestamp() AT TIME ZONE 'America/Argentina/Buenos_Aires') + ($1::integer * interval '1 month'))::date,$2,$3)",[mode === 'INITIAL' ? 0 : 1, amountCents.toString(),actorId]);

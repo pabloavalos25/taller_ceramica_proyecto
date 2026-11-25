@@ -14,7 +14,8 @@ test('fee prices are scheduled for future periods and preserve earlier values', 
   const root = new pg.Client({ connectionString:url }); await root.connect(); await root.query(`CREATE SCHEMA "${schema}"`);
   const pool = new pg.Pool({ connectionString:url, options:`-c search_path=${schema}` });
   try {
-    for (const file of ['001_initial.sql','006_auth_sessions.sql','012_fee_price_history.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`,import.meta.url),'utf8'));
+    for (const file of ['001_initial.sql','006_auth_sessions.sql','012_fee_price_history.sql','003_financial_foundation.sql','015_fee_adjustments.sql','024_fee_tier_schedules.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`,import.meta.url),'utf8'));
+    await pool.query('DELETE FROM fee_tier_rules');await pool.query('DELETE FROM fee_tier_schedules');
     const admin = (await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com','hash','ADMIN',false) RETURNING id")).rows[0].id;
     const student = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('ana@example.com','hash','USER') RETURNING id")).rows[0].id;
     const token = await createSession(pool,admin), other = await createSession(pool,student);

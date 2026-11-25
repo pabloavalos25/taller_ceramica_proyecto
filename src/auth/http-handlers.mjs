@@ -25,11 +25,21 @@ function getCookie(request, name) {
   return values.length === 1 && tokenPattern.test(values[0]) ? values[0] : null;
 }
 
-export function createAuthHandlers({ origin, production, authenticate, revokeSession, getSession, changePassword, resetStudentPassword, createStudent, changeStudentStatus, listStudents, setFeePrice, getFeePrices, setDueDay, getDueDays, adjustFee, listAdjustableFees, saveKilnBatch, listKilnBatches, getKilnBatch, correctKilnItem, saveMaterial, listMaterials, saveMaterialBatch, listMaterialBatches, getMaterialBatch, listPayableCharges, recordAuthorizedPayment, listPayments, getPayment, voidAuthorizedPayment, getStudentPortal, getAdminSummary, correctMaterialItem, listDrafts, getDraft, saveDraft, confirmDraft }) {
+export function createAuthHandlers({ origin, production, authenticate, revokeSession, getSession, changePassword, resetStudentPassword, createStudent, changeStudentStatus, listStudents, setFeePrice, getFeePrices, getFeeTierSchedules, scheduleFeeTiers, setDueDay, getDueDays, adjustFee, listAdjustableFees, saveKilnBatch, listKilnBatches, getKilnBatch, correctKilnItem, saveMaterial, listMaterials, saveMaterialBatch, listMaterialBatches, getMaterialBatch, listPayableCharges, recordAuthorizedPayment, listPayments, getPayment, voidAuthorizedPayment, getStudentPortal, getAdminSummary, correctMaterialItem, listDrafts, getDraft, saveDraft, confirmDraft }) {
   const name = production ? '__Host-suyai_session' : 'suyai_session';
   const cookie = (value, maxAge) => `${name}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${production ? '; Secure' : ''}`;
   const allowed = (request) => checkMutationOrigin(request, origin, production);
   return {
+    async feeTiers(request) {
+      const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);
+      try {
+        if(request.method==='GET')return json(await getFeeTierSchedules({actorToken:token}));
+        if(request.method!=='POST'||!allowed(request))return json({error:'Solicitud no permitida'},403);
+        let body;try{body=await readBody(request);}catch{return json({error:'Datos inválidos'},400);}
+        if(!body||!Array.isArray(body.tiers)||Object.keys(body).some(key=>key!=='tiers')||body.tiers.some(rule=>!rule||Object.keys(rule).some(key=>!['startDay','amountCents'].includes(key))))return json({error:'Datos inválidos'},400);
+        return json(await scheduleFeeTiers({actorToken:token,tiers:body.tiers}));
+      }catch(error){if(error instanceof RangeError)return json({error:error.message},400);if(/no autorizada/i.test(error?.message??''))return json({error:'Operación no autorizada'},403);return json({error:'Servicio no disponible'},503);}
+    },
     async adminSummary(request) {
       const token=getCookie(request,name);
       if(!token)return json({error:'Sesión requerida'},401);
@@ -156,6 +166,7 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
       try { await setFeePrice({ actorToken:token, mode:body.mode, amountCents:BigInt(body.amountCents) }); return json({ ok:true }); }
       catch (error) {
         if (error?.code === 'FORBIDDEN') return json({ error:'Operación no autorizada' },403);
+        if (error?.code === 'TIERS') return json({ error:'Configurá los importes desde la sección de tramos.' },409);
         if (error?.code === 'INITIAL') return json({ error:'Revisá la configuración inicial de la cuota.' },409);
         if (error instanceof RangeError) return json({ error:'Datos inválidos' },400);
         return json({ error:'Servicio no disponible' },503);
@@ -177,6 +188,7 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
       try { await setDueDay({actorToken:token,mode:body.mode,day:body.day}); return json({ok:true}); }
       catch(error) {
         if(error?.code==='FORBIDDEN') return json({error:'Operación no autorizada'},403);
+        if(error?.code==='TIERS') return json({error:'Configurá los vencimientos desde la sección de tramos.'},409);
         if(error?.code==='INITIAL') return json({error:'Revisá la configuración inicial del vencimiento.'},409);
         if(error instanceof RangeError) return json({error:'Datos inválidos'},400);
         return json({error:'Servicio no disponible'},503);
@@ -261,7 +273,7 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
       let body;try{body=await readBody(request,131072);}catch{return json({error:'Datos inválidos o demasiado extensos'},400);}
       if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(k=>!['studentId','idempotencyKey','method','allocations','notes'].includes(k))||!Array.isArray(body.allocations)||!body.allocations.length||body.allocations.length>500||body.allocations.some(x=>!x||Object.keys(x).some(k=>!['chargeId','amountCents'].includes(k))||typeof x.chargeId!=='string'||typeof x.amountCents!=='string'||!/^[1-9]\d{0,18}$/.test(x.amountCents)))return json({error:'Datos inválidos'},400);
       try{return json(await recordAuthorizedPayment({actorToken:token,studentId:body.studentId,idempotencyKey:body.idempotencyKey,method:body.method,notes:body.notes??null,allocations:body.allocations.map(x=>({chargeId:x.chargeId,amount:BigInt(x.amountCents)}))}));}
-      catch(e){if(e?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(e instanceof RangeError||/idempotencia|cargo inexistente/i.test(e?.message??''))return json({error:'No se pudo registrar: revisá los importes y saldos actualizados.'},409);return json({error:'Servicio no disponible'},503);}
+      catch(e){if(e?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(e instanceof RangeError&&e.message==='La cuota debe abonarse completa.')return json({error:'La cuota debe abonarse completa.'},409);if(e instanceof RangeError||/idempotencia|cargo inexistente/i.test(e?.message??''))return json({error:'No se pudo registrar: revisá los importes y saldos actualizados.'},409);return json({error:'Servicio no disponible'},503);}
     },
     async materialHistory(request) {
       const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);

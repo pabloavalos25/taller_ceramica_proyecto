@@ -1,12 +1,17 @@
 import {createHash} from 'node:crypto';
+import {syncFeeTiers} from '../fees/sync-tiers.mjs';
 export class StudentPortalError extends Error{constructor(code,message){super(message);this.code=code;}}
 export async function getStudentPortal(pool,{actorToken,chargesOffset=0,paymentsOffset=0}={}){
  if(typeof actorToken!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(actorToken))throw new StudentPortalError('FORBIDDEN','Operación no autorizada');
  if(![chargesOffset,paymentsOffset].every(n=>Number.isInteger(n)&&n>=0&&n<=100000))throw new RangeError('Filtros inválidos');
  const client=await pool.connect();try{
-  await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-  const profile=await client.query("SELECT s.user_id,s.full_name,s.active FROM auth_sessions a JOIN users u ON u.id=a.user_id JOIN student_profiles s ON s.user_id=u.id WHERE a.token_hash=$1 AND a.revoked_at IS NULL AND a.expires_at>now() AND u.role='USER' AND NOT u.must_change_password",[createHash('sha256').update(actorToken).digest('hex')]);
+  await client.query('BEGIN');
+  let profile=await client.query("SELECT s.user_id,s.full_name,s.active FROM auth_sessions a JOIN users u ON u.id=a.user_id JOIN student_profiles s ON s.user_id=u.id WHERE a.token_hash=$1 AND a.revoked_at IS NULL AND a.expires_at>now() AND u.role='USER' AND NOT u.must_change_password",[createHash('sha256').update(actorToken).digest('hex')]);
   if(!profile.rowCount)throw new StudentPortalError('FORBIDDEN','Operación no autorizada');const userId=profile.rows[0].user_id;
+  await syncFeeTiers(client,{studentId:userId});
+  await client.query('COMMIT');await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+  profile=await client.query("SELECT s.user_id,s.full_name,s.active FROM auth_sessions a JOIN users u ON u.id=a.user_id JOIN student_profiles s ON s.user_id=u.id WHERE a.token_hash=$1 AND a.revoked_at IS NULL AND a.expires_at>now() AND u.role='USER' AND NOT u.must_change_password",[createHash('sha256').update(actorToken).digest('hex')]);
+  if(!profile.rowCount||profile.rows[0].user_id!==userId)throw new StudentPortalError('FORBIDDEN','Operación no autorizada');
   const summary=await client.query(`SELECT COALESCE(sum(c.amount_cents-p.paid),0)::text AS "outstandingCents",count(*) FILTER (WHERE c.amount_cents>p.paid)::int AS "pendingCount",COALESCE(bool_or(p.paid>c.amount_cents),false) OR EXISTS(SELECT 1 FROM monthly_fees f WHERE f.student_id=$1 AND NOT EXISTS(SELECT 1 FROM charges x WHERE x.monthly_fee_id=f.id AND x.student_id=f.student_id)) AS inconsistent FROM charges c CROSS JOIN LATERAL (SELECT COALESCE(sum(a.amount_cents),0) AS paid FROM payment_allocations a WHERE a.charge_id=c.id AND NOT EXISTS(SELECT 1 FROM payment_events e WHERE e.payment_id=a.payment_id AND e.event_type='VOIDED')) p WHERE c.student_id=$1`,[userId]);
   const categoryTotals=await client.query(`SELECT c.category, COALESCE(sum(c.amount_cents-p.paid),0)::text AS total FROM charges c CROSS JOIN LATERAL (SELECT COALESCE(sum(a.amount_cents),0) AS paid FROM payment_allocations a WHERE a.charge_id=c.id AND NOT EXISTS(SELECT 1 FROM payment_events e WHERE e.payment_id=a.payment_id AND e.event_type='VOIDED')) p WHERE c.student_id=$1 GROUP BY c.category`,[userId]);
   summary.rows[0].byCategory={FEE:'0',KILN:'0',MATERIAL:'0',...Object.fromEntries(categoryTotals.rows.map(row=>[row.category,row.total]))};

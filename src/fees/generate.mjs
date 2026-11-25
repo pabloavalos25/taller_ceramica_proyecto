@@ -13,8 +13,13 @@ export async function generatePeriod(pool, period) {
     if (period > now) throw new RangeError('No se generan cuotas de períodos futuros');
     const price = (await client.query('SELECT amount_cents::text AS amount FROM fee_price_history WHERE effective_period <= $1::date ORDER BY effective_period DESC,id DESC LIMIT 1',[date])).rows[0];
     const settings = (await client.query('SELECT due_day FROM fee_due_day_history WHERE effective_period <= $1::date ORDER BY effective_period DESC,id DESC LIMIT 1',[date])).rows[0];
-    if (!price || !settings) throw new Error('Falta configuración histórica del valor o vencimiento');
-    const dueDate = dueDateForPeriod(year,month,settings.due_day,'MAX_28');
+    const schedule=(await client.query('SELECT id FROM fee_tier_schedules WHERE effective_period <= $1::date ORDER BY effective_period DESC,id DESC LIMIT 1',[date])).rows[0];
+    const rules=schedule?(await client.query('SELECT start_day,amount_cents::text AS amount FROM fee_tier_rules WHERE schedule_id=$1 ORDER BY start_day',[schedule.id])).rows:[];
+    if(schedule&&(!rules.length||rules[0].start_day!==1))throw new Error('Configuración de tramos incompleta; requiere revisión');
+    if(!schedule&&(!price||!settings))throw new Error('Falta configuración histórica del valor o vencimiento');
+    const initialAmount=schedule?rules[0].amount:price.amount;
+    const firstDueDay=schedule?(rules[1]?rules[1].start_day-1:28):settings.due_day;
+    const dueDate = dueDateForPeriod(year,month,firstDueDay,'LAST_DAY');
     await client.query('SELECT user_id FROM student_profiles ORDER BY user_id FOR UPDATE');
     const unknown = await client.query(`
       SELECT p.user_id FROM student_profiles p
@@ -47,9 +52,9 @@ export async function generatePeriod(pool, period) {
       ) ORDER BY p.user_id`, [date]);
     let created=0;
     for (const row of eligible.rows) {
-      const inserted=await client.query('INSERT INTO monthly_fees(student_id,period_year,period_month,original_cents,due_date) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (student_id,period_year,period_month) DO NOTHING RETURNING id',[row.user_id,year,month,price.amount,dueDate]);
+      const inserted=await client.query('INSERT INTO monthly_fees(student_id,period_year,period_month,original_cents,due_date) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (student_id,period_year,period_month) DO NOTHING RETURNING id',[row.user_id,year,month,initialAmount,dueDate]);
       if (inserted.rowCount) {
-        await client.query("INSERT INTO charges(student_id,category,monthly_fee_id,amount_cents,description) VALUES ($1,'FEE',$2,$3,$4)",[row.user_id,inserted.rows[0].id,price.amount,`Cuota ${period}`]);
+        await client.query("INSERT INTO charges(student_id,category,monthly_fee_id,amount_cents,description) VALUES ($1,'FEE',$2,$3,$4)",[row.user_id,inserted.rows[0].id,initialAmount,`Cuota ${period}`]);
         created++;
       } else {
         const existing=await client.query('SELECT 1 FROM monthly_fees f JOIN charges c ON c.monthly_fee_id=f.id AND c.student_id=f.student_id WHERE f.student_id=$1 AND f.period_year=$2 AND f.period_month=$3',[row.user_id,year,month]);

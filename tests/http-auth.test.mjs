@@ -2,6 +2,17 @@
 import assert from 'node:assert/strict';
 import { createAuthHandlers } from '../src/auth/http-handlers.mjs';
 
+test('fee tiers require a session and same origin for changes',async()=>{
+ const token='A'.repeat(43);let changed=false;
+ const handlers=createAuthHandlers({origin:'https://suyai.example',production:true,getFeeTierSchedules:async()=>({history:[]}),scheduleFeeTiers:async()=>{changed=true;return {id:'1'};}});
+ const cookie=`__Host-suyai_session=${token}`,url='https://suyai.example/api/admin/fee-tiers';
+ assert.equal((await handlers.feeTiers(new Request(url))).status,401);
+ const bad=new Request(url,{method:'POST',headers:{cookie,origin:'https://otro.example','content-type':'application/json'},body:JSON.stringify({tiers:[]})});
+ assert.equal((await handlers.feeTiers(bad)).status,403);assert.equal(changed,false);
+ const good=new Request(url,{method:'POST',headers:{cookie,origin:'https://suyai.example','content-type':'application/json'},body:JSON.stringify({tiers:[{startDay:1,amountCents:'4500000'}]})});
+ assert.equal((await handlers.feeTiers(good)).status,200);assert.equal(changed,true);
+});
+
 test('login rejects cross-origin and config errors without authenticating', async () => {
   let calls = 0;
   const handlers = createAuthHandlers({ origin: 'https://suyai.example', production: true, authenticate: async () => { calls++; return 'x'; } });

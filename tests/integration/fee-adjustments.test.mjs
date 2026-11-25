@@ -15,14 +15,18 @@ test('fee adjustment is audited, idempotent and cannot fall below payments', asy
   const root=new pg.Client({connectionString:url}); await root.connect(); await root.query(`CREATE SCHEMA "${schema}"`);
   const pool=new pg.Pool({connectionString:url,options:`-c search_path=${schema}`});
   try {
-    for(const file of ['001_initial.sql','003_financial_foundation.sql','004_payment_idempotency.sql','005_payment_void.sql','006_auth_sessions.sql','015_fee_adjustments.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`,import.meta.url),'utf8'));
-    const admin=(await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com','hash','ADMIN',false) RETURNING id")).rows[0].id;
+    for(const file of ['001_initial.sql','003_financial_foundation.sql','004_payment_idempotency.sql','005_payment_void.sql','006_auth_sessions.sql','015_fee_adjustments.sql','024_fee_tier_schedules.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`,import.meta.url),'utf8'));
+    await pool.query('DELETE FROM fee_tier_rules');await pool.query('DELETE FROM fee_tier_schedules');
+  const admin=(await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com','hash','ADMIN',false) RETURNING id")).rows[0].id;
     const student=(await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('ana@example.com','hash','USER') RETURNING id")).rows[0].id;
     await pool.query("INSERT INTO student_profiles(user_id,full_name,enrolled_on) VALUES ($1,'Ana','2026-11-25')",[student]);
     const fee=(await pool.query("INSERT INTO monthly_fees(student_id,period_year,period_month,original_cents,due_date) VALUES ($1,2026,11,10000,'2026-11-10') RETURNING id",[student])).rows[0].id;
     const charge=(await pool.query("INSERT INTO charges(student_id,category,monthly_fee_id,amount_cents,description) VALUES ($1,'FEE',$2,10000,'Cuota') RETURNING id",[student,fee])).rows[0].id;
     const token=await createSession(pool,admin), other=await createSession(pool,student);
-    await recordPayment(pool,{actorId:admin,studentId:student,idempotencyKey:randomUUID(),method:'CASH',allocations:[{chargeId:charge,amount:4000n}]});
+    // Pago parcial histórico, registrado antes de exigir el pago completo de cuotas.
+    const historical=(await pool.query("INSERT INTO payments(student_id,amount_cents,method,recorded_by) VALUES ($1,4000,'CASH',$2) RETURNING id",[student,admin])).rows[0].id;
+    await pool.query('INSERT INTO payment_allocations(payment_id,charge_id,student_id,amount_cents) VALUES ($1,$2,$3,4000)',[historical,charge,student]);
+    await pool.query("INSERT INTO payment_events(payment_id,actor_id,event_type) VALUES ($1,$2,'CREATED')",[historical,admin]);
     await assert.rejects(listAdjustableFees(pool,{actorToken:other,search:'Ana'}),/autoriz/i);
     const listed=await listAdjustableFees(pool,{actorToken:token,search:'Ana'});
     assert.deepEqual(listed.items.map(({id,studentName,originalCents,amountCents,paidCents})=>({id,studentName,originalCents,amountCents,paidCents})),[{id:fee,studentName:'Ana',originalCents:'10000',amountCents:'10000',paidCents:'4000'}]);
@@ -46,7 +50,7 @@ test('fee adjustment is audited, idempotent and cannot fall below payments', asy
     const concurrentCharge=(await pool.query("INSERT INTO charges(student_id,category,monthly_fee_id,amount_cents,description) VALUES ($1,'FEE',$2,10000,'Cuota') RETURNING id",[student,concurrentFee])).rows[0].id;
     const outcomes=await Promise.allSettled([
       adjustFee(pool,{actorToken:token,feeId:concurrentFee,amountCents:5000n,reason:'Descuento',idempotencyKey:randomUUID()}),
-      recordPayment(pool,{actorId:admin,studentId:student,idempotencyKey:randomUUID(),method:'CASH',allocations:[{chargeId:concurrentCharge,amount:8000n}]})
+      recordPayment(pool,{actorId:admin,studentId:student,idempotencyKey:randomUUID(),method:'CASH',allocations:[{chargeId:concurrentCharge,amount:10000n}]})
     ]);
     assert.equal(outcomes.filter((item)=>item.status==='fulfilled').length,1);
     assert.equal(outcomes.filter((item)=>item.status==='rejected').length,1);

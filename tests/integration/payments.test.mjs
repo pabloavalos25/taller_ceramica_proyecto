@@ -14,10 +14,11 @@ test('payments are atomic, idempotent and prevent concurrent overpayment', async
   await root.query(`CREATE SCHEMA "${schema}"`);
   const pool = new pg.Pool({ connectionString: url, options: `-c search_path=${schema}` });
   try {
-    for (const file of ['001_initial.sql', '002_student_status_history.sql', '003_financial_foundation.sql', '004_payment_idempotency.sql']) {
+    for (const file of ['001_initial.sql', '002_student_status_history.sql', '003_financial_foundation.sql', '004_payment_idempotency.sql','005_payment_void.sql','015_fee_adjustments.sql','024_fee_tier_schedules.sql']) {
       await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
-    const admin = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('admin@example.com','hash','ADMIN') RETURNING id")).rows[0].id;
+    await pool.query('DELETE FROM fee_tier_rules');await pool.query('DELETE FROM fee_tier_schedules');
+  const admin = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('admin@example.com','hash','ADMIN') RETURNING id")).rows[0].id;
     const student = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('student@example.com','hash','USER') RETURNING id")).rows[0].id;
     await pool.query("INSERT INTO student_profiles(user_id,full_name,enrolled_on) VALUES ($1,'Ana','2026-11-25')", [student]);
     const charge = (await pool.query("INSERT INTO charges(student_id,category,amount_cents,description) VALUES ($1,'KILN',10000,'Pieza') RETURNING id", [student])).rows[0].id;
@@ -35,6 +36,10 @@ test('payments are atomic, idempotent and prevent concurrent overpayment', async
     assert.equal((await pool.query('SELECT sum(amount_cents)::text AS sum FROM payment_allocations WHERE charge_id=$1', [charge])).rows[0].sum, '8000');
     assert.equal((await pool.query('SELECT count(*)::int AS count FROM payments')).rows[0].count, 2);
     assert.equal((await pool.query('SELECT count(*)::int AS count FROM payment_events')).rows[0].count, 2);
+    const fee=(await pool.query("INSERT INTO monthly_fees(student_id,period_year,period_month,original_cents,due_date) VALUES ($1,2026,12,4500000,'2026-12-10') RETURNING id",[student])).rows[0].id;
+    const feeCharge=(await pool.query("INSERT INTO charges(student_id,category,monthly_fee_id,amount_cents,description) VALUES ($1,'FEE',$2,4500000,'Cuota diciembre') RETURNING id",[student,fee])).rows[0].id;
+    await assert.rejects(recordPayment(pool,{...request,idempotencyKey:randomUUID(),allocations:[{chargeId:feeCharge,amount:1000000n}]}),/cuota.*complet/i);
+    const full=await recordPayment(pool,{...request,idempotencyKey:randomUUID(),allocations:[{chargeId:feeCharge,amount:4500000n}]});assert.ok(full.id);
     await assert.rejects(recordPayment(pool, { ...request, idempotencyKey: randomUUID(), allocations: [{ chargeId: charge, amount: 2001n }] }), /Asignación inválida/);
     const secondCharge = (await pool.query("INSERT INTO charges(student_id,category,amount_cents,description) VALUES ($1,'MATERIAL',1000,'Material') RETURNING id", [student])).rows[0].id;
     await assert.rejects(recordPayment(pool, { ...request, idempotencyKey: randomUUID(), allocations: [{ chargeId: secondCharge, amount: 1000n }, { chargeId: charge, amount: 2001n }] }), /Asignación inválida/);
@@ -43,7 +48,7 @@ test('payments are atomic, idempotent and prevent concurrent overpayment', async
     await pool.query(`CREATE FUNCTION fail_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced failure'; END $$`);
     await pool.query('CREATE TRIGGER force_event_failure BEFORE INSERT ON payment_events FOR EACH ROW EXECUTE FUNCTION fail_event()');
     await assert.rejects(recordPayment(pool, { ...request, idempotencyKey: randomUUID(), allocations: [{ chargeId: charge, amount: 2000n }] }), /forced failure/);
-    assert.equal((await pool.query('SELECT count(*)::int AS count FROM payments')).rows[0].count, 2);
+    assert.equal((await pool.query('SELECT count(*)::int AS count FROM payments')).rows[0].count, 3);
     assert.equal((await pool.query('SELECT sum(amount_cents)::text AS sum FROM payment_allocations WHERE charge_id=$1', [charge])).rows[0].sum, '8000');
   } finally {
     await pool.end();

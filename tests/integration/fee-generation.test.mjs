@@ -13,8 +13,9 @@ test('generation is atomic, idempotent and catches up a formerly active student'
   const root=new pg.Client({connectionString:url}); await root.connect(); await root.query(`CREATE SCHEMA "${schema}"`);
   const pool=new pg.Pool({connectionString:url,options:`-c search_path=${schema}`});
   try {
-    for(const file of ['001_initial.sql','002_student_status_history.sql','003_financial_foundation.sql','010_student_creation.sql','011_student_status_changes.sql','012_fee_price_history.sql','013_fee_due_day_history.sql','014_fee_generation.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`,import.meta.url),'utf8'));
-    const admin=(await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com','hash','ADMIN',false) RETURNING id")).rows[0].id;
+    for(const file of ['001_initial.sql','002_student_status_history.sql','003_financial_foundation.sql','010_student_creation.sql','011_student_status_changes.sql','012_fee_price_history.sql','013_fee_due_day_history.sql','014_fee_generation.sql','004_payment_idempotency.sql','005_payment_void.sql','015_fee_adjustments.sql','024_fee_tier_schedules.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`,import.meta.url),'utf8'));
+    await pool.query('DELETE FROM fee_tier_rules');await pool.query('DELETE FROM fee_tier_schedules');
+  const admin=(await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com','hash','ADMIN',false) RETURNING id")).rows[0].id;
     const periods=(await pool.query("SELECT to_char(date_trunc('month',now() AT TIME ZONE 'America/Argentina/Buenos_Aires'),'YYYY-MM') AS current, to_char(date_trunc('month',now() AT TIME ZONE 'America/Argentina/Buenos_Aires') - interval '1 month','YYYY-MM') AS previous, to_char(date_trunc('month',now() AT TIME ZONE 'America/Argentina/Buenos_Aires') + interval '1 month','YYYY-MM') AS next")).rows[0];
     await pool.query("INSERT INTO fee_price_history(effective_period,amount_cents,actor_id) VALUES (($1 || '-01')::date,3500000,$2)",[periods.previous,admin]);
     await pool.query("INSERT INTO fee_price_history(effective_period,amount_cents,actor_id) VALUES (($1 || '-01')::date,4000000,$2)",[periods.current,admin]);

@@ -29,7 +29,8 @@ test('recorrido integral: alta, cuota, consumos, pago y cuenta de alumna', async
     for (const file of (await readdir(migrations)).filter(name => name.endsWith('.sql')).sort()) {
       await pool.query(await readFile(new URL(file, migrations), 'utf8'));
     }
-    const admin = (await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@test.invalid','hash','ADMIN',false) RETURNING id")).rows[0].id;
+    await pool.query('DELETE FROM fee_tier_rules');await pool.query('DELETE FROM fee_tier_schedules');
+  const admin = (await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@test.invalid','hash','ADMIN',false) RETURNING id")).rows[0].id;
     const actorToken = await createSession(pool, admin);
     const { period, today } = (await pool.query("SELECT to_char(now() AT TIME ZONE 'America/Argentina/Buenos_Aires','YYYY-MM') AS period, to_char(now() AT TIME ZONE 'America/Argentina/Buenos_Aires','YYYY-MM-DD') AS today")).rows[0];
     const initialPassword = 'ClaveTemporal2026!';

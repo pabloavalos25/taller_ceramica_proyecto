@@ -8,6 +8,7 @@ export function preparePayment(form,charges){
   if(value===''||value==null)continue;const charge=charges.find(x=>x.id===id);if(!charge||charge.inconsistent)throw new RangeError('El cargo requiere revisión.');
   let amount;try{amount=BigInt(parseArsCents(value));}catch{throw new RangeError('Ingresá un importe válido.');}
   if(amount<=0n||amount>BigInt(charge.outstandingCents))throw new RangeError('El importe debe ser mayor que cero y no superar el saldo pendiente.');
+  if(charge.category==='FEE'&&amount!==BigInt(charge.outstandingCents))throw new RangeError('La cuota debe abonarse completa.');
   allocations.push({chargeId:id,amountCents:amount.toString()});total+=amount;
  }
  if(!allocations.length)throw new RangeError('Elegí al menos un cargo e ingresá un importe.');

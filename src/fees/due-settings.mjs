@@ -17,6 +17,8 @@ async function writeDay(pool, { actorToken, day }, initial) {
     await client.query('BEGIN');
     const actorId=await actor(client,hash,true);
     if (!(await client.query('SELECT id FROM fee_price_lock WHERE id=true FOR UPDATE')).rowCount) throw new Error('Falta bloqueo de configuración de cuotas');
+    const tiered=(await client.query("SELECT EXISTS(SELECT 1 FROM fee_tier_schedules WHERE effective_period <= (date_trunc('month',statement_timestamp() AT TIME ZONE 'America/Argentina/Buenos_Aires') + ($1::integer * interval '1 month'))::date) AS active",[initial?0:1])).rows[0].active;
+    if(tiered)throw new DueDayError('TIERS','Configurá los vencimientos desde la sección de tramos.');
     const state=(await client.query('SELECT EXISTS(SELECT 1 FROM fee_due_day_history) AS configured, EXISTS(SELECT 1 FROM monthly_fees) AS has_fees')).rows[0];
     if ((initial && (state.configured || state.has_fees)) || (!initial && !state.configured)) throw new DueDayError('INITIAL','Configuración inicial no disponible o pendiente');
     await client.query("INSERT INTO fee_due_day_history(effective_period,due_day,actor_id) VALUES ((date_trunc('month',statement_timestamp() AT TIME ZONE 'America/Argentina/Buenos_Aires') + ($1::integer * interval '1 month'))::date,$2,$3)",[initial ? 0 : 1,day,actorId]);

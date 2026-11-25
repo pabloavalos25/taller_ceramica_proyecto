@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {recordPayment,voidPayment} from '../db/payments.mjs';
+import {syncFeeTiers} from '../fees/sync-tiers.mjs';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export class PaymentAccessError extends Error{constructor(code,message){super(message);this.code=code;}}
 async function withAdmin(pool,token,fn){
@@ -16,6 +17,7 @@ export async function listPayableCharges(pool,{actorToken,studentId,offset=0}){
   return withAdmin(pool,actorToken,async client=>{
     const student=await client.query('SELECT user_id,full_name,active FROM student_profiles WHERE user_id=$1',[studentId]);
     if(!student.rowCount)throw new PaymentAccessError('STUDENT','Alumna inexistente');
+    await syncFeeTiers(client,{studentId});
     const result=await client.query(`SELECT c.id,c.category,c.description,c.amount_cents::text AS "amountCents",p.paid::text AS "paidCents",(c.amount_cents::numeric-p.paid)::text AS "outstandingCents",p.paid>c.amount_cents AS inconsistent FROM charges c CROSS JOIN LATERAL (SELECT COALESCE(sum(a.amount_cents),0) AS paid FROM payment_allocations a WHERE a.charge_id=c.id AND NOT EXISTS(SELECT 1 FROM payment_events e WHERE e.payment_id=a.payment_id AND e.event_type='VOIDED')) p WHERE c.student_id=$1 AND (c.amount_cents>p.paid OR p.paid>c.amount_cents) ORDER BY c.created_at,c.id LIMIT 51 OFFSET $2`,[studentId,offset]);
     return {student:{id:student.rows[0].user_id,name:student.rows[0].full_name,active:student.rows[0].active},items:result.rows.slice(0,50),hasMore:result.rowCount>50};
   });

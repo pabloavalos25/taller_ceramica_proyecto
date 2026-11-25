@@ -7,3 +7,9 @@ test('prepara asignaciones parciales en centavos exactos y rechaza sobrepagos',(
  assert.throws(()=>preparePayment({studentId:'student',method:'CASH',amounts:{}},charges),/cargo/i);
  assert.throws(()=>preparePayment({studentId:'student',method:'CASH',amounts:{a:'1'}},[{...charges[0],inconsistent:true}]),/revisión/i);
 });
+test('exige abonar completa la cuota y permite pagos parciales de otros cargos',()=>{
+ const charges=[{id:'fee',category:'FEE',outstandingCents:'4500000',inconsistent:false},{id:'kiln',category:'KILN',outstandingCents:'100000',inconsistent:false}];
+ assert.throws(()=>preparePayment({studentId:'student',method:'CASH',amounts:{fee:'10.000'}},charges),/cuota.*complet/i);
+ const result=preparePayment({studentId:'student',method:'CASH',amounts:{fee:'45.000',kiln:'500'}},charges);
+ assert.equal(result.totalCents,'4550000');
+});

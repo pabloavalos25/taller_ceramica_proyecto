@@ -17,8 +17,9 @@ test('scheduled job fails closed until configured and safely resumes after resta
   const root=new pg.Client({connectionString:url}); await root.connect(); await root.query(`CREATE SCHEMA "${schema}"`);
   const pool=new pg.Pool({connectionString:url,options:`-c search_path=${schema}`});
   try {
-    for(const file of ['001_initial.sql','002_student_status_history.sql','003_financial_foundation.sql','010_student_creation.sql','011_student_status_changes.sql','012_fee_price_history.sql','013_fee_due_day_history.sql','014_fee_generation.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`,import.meta.url),'utf8'));
-    const admin=(await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('admin@example.com','hash','ADMIN') RETURNING id")).rows[0].id;
+    for(const file of ['001_initial.sql','002_student_status_history.sql','003_financial_foundation.sql','010_student_creation.sql','011_student_status_changes.sql','012_fee_price_history.sql','013_fee_due_day_history.sql','014_fee_generation.sql','004_payment_idempotency.sql','005_payment_void.sql','015_fee_adjustments.sql','024_fee_tier_schedules.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`,import.meta.url),'utf8'));
+    await pool.query('DELETE FROM fee_tier_rules');await pool.query('DELETE FROM fee_tier_schedules');
+  const admin=(await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('admin@example.com','hash','ADMIN') RETURNING id")).rows[0].id;
     const student=(await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('ana@example.com','hash','USER') RETURNING id")).rows[0].id;
     await pool.query("INSERT INTO student_profiles(user_id,full_name,enrolled_on) VALUES ($1,'Ana',current_date)",[student]);
     const month=(await pool.query("SELECT to_char(date_trunc('month',now() AT TIME ZONE 'America/Argentina/Buenos_Aires'),'YYYY-MM') AS p")).rows[0].p;

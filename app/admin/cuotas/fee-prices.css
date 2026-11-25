@@ -14,3 +14,5 @@
 .fee-tier-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px}.fee-tier-row .fee-field{max-width:none;align-content:start}.fee-tier-actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.fee-tier-actions .fee-primary{margin:0}@media(max-width:700px){.fee-tier-row{grid-template-columns:1fr}.fee-tier-actions>*{width:100%}}
 .fee-legacy{margin:24px 0}.fee-legacy>summary{color:var(--green);font-weight:700;cursor:pointer}.fee-legacy>summary:focus-visible{outline:3px solid #354d2e;outline-offset:3px}
 .fee-tier-summary{margin-top:20px;padding:16px;border-radius:10px;background:#eef2ec;color:#34432d;font-size:14px}.fee-tier-summary p{margin:6px 0}
+
+.fee-layout{background:linear-gradient(rgba(247,246,243,.8),rgba(247,246,243,.8)),url('/fondo-marmol.png') center/cover fixed}

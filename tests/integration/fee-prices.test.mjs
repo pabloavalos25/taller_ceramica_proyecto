@@ -1,0 +1,54 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import pg from 'pg';
+import { createSession } from '../../src/auth/sessions.mjs';
+import { createAuthHandlers } from '../../src/auth/http-handlers.mjs';
+import { setFeePrice, getFeePrices } from '../../src/fees/prices.mjs';
+const url = process.env.TEST_DATABASE_URL;
+if (!url) throw new Error('TEST_DATABASE_URL debe apuntar a una base de pruebas aislada');
+
+test('fee prices are scheduled for future periods and preserve earlier values', async () => {
+  const schema = `suyai_test_${randomUUID().replaceAll('-', '')}`;
+  const root = new pg.Client({ connectionString:url }); await root.connect(); await root.query(`CREATE SCHEMA "${schema}"`);
+  const pool = new pg.Pool({ connectionString:url, options:`-c search_path=${schema}` });
+  try {
+    for (const file of ['001_initial.sql','006_auth_sessions.sql','012_fee_price_history.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`,import.meta.url),'utf8'));
+    const admin = (await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com','hash','ADMIN',false) RETURNING id")).rows[0].id;
+    const student = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('ana@example.com','hash','USER') RETURNING id")).rows[0].id;
+    const token = await createSession(pool,admin), other = await createSession(pool,student);
+    await assert.rejects(setFeePrice(pool,{actorToken:other,mode:'INITIAL',amountCents:3500000n}),/autoriz/i);
+    await assert.rejects(setFeePrice(pool,{actorToken:token,mode:'SCHEDULE',amountCents:3500000n}),/inicial/i);
+    await pool.query("INSERT INTO student_profiles(user_id,full_name,enrolled_on) VALUES ($1,'Ana','2026-11-25')", [student]);
+    const preexisting = (await pool.query("INSERT INTO monthly_fees(student_id,period_year,period_month,original_cents,due_date) VALUES ($1,2026,11,100,'2026-11-30') RETURNING id", [student])).rows[0].id;
+    await assert.rejects(setFeePrice(pool,{actorToken:token,mode:'INITIAL',amountCents:3500000n}),/inicial/i);
+    await pool.query('DELETE FROM monthly_fees WHERE id=$1', [preexisting]);
+    await setFeePrice(pool,{actorToken:token,mode:'INITIAL',amountCents:3500000n});
+    await assert.rejects(setFeePrice(pool,{actorToken:token,mode:'INITIAL',amountCents:4000000n}),/inicial/i);
+    await setFeePrice(pool,{actorToken:token,mode:'SCHEDULE',amountCents:4000000n});
+    await setFeePrice(pool,{actorToken:token,mode:'SCHEDULE',amountCents:4200000n});
+    const state = await getFeePrices(pool,{actorToken:token});
+    assert.equal(state.current.actorEmail,'admin@example.com'); assert.equal(state.current.amountCents,'3500000'); assert.equal(state.next.amountCents,'4200000'); assert.equal(state.history.length,3);
+    const periods = (await pool.query("SELECT to_char(date_trunc('month',now() AT TIME ZONE 'America/Argentina/Buenos_Aires'),'YYYY-MM-DD') AS current, to_char(date_trunc('month',now() AT TIME ZONE 'America/Argentina/Buenos_Aires')+interval '1 month','YYYY-MM-DD') AS next")).rows[0];
+    assert.equal(state.current.effectivePeriod,periods.current); assert.equal(state.next.effectivePeriod,periods.next);
+    await assert.rejects(setFeePrice(pool,{actorToken:token,mode:'SCHEDULE',amountCents:-1n}),/importe/i);
+    const concurrent = await Promise.all([setFeePrice(pool,{actorToken:token,mode:'SCHEDULE',amountCents:4300000n}), setFeePrice(pool,{actorToken:token,mode:'SCHEDULE',amountCents:4400000n})]);
+    assert.equal(concurrent.length,2);
+    const afterConcurrent = await getFeePrices(pool,{actorToken:token});
+    assert.equal(afterConcurrent.history.length,5);
+    assert.ok(['4300000','4400000'].includes(afterConcurrent.next.amountCents));
+    await pool.query('UPDATE users SET must_change_password=true WHERE id=$1', [admin]);
+    await assert.rejects(getFeePrices(pool,{actorToken:token}),/autoriz/i);
+    await pool.query('UPDATE users SET must_change_password=false WHERE id=$1', [admin]);
+    const handlers=createAuthHandlers({origin:'https://suyai.example',production:true,setFeePrice:(data)=>setFeePrice(pool,data),getFeePrices:(data)=>getFeePrices(pool,data)});
+    const read = (cookie) => new Request('https://suyai.example/api/admin/fee-prices',{headers:{cookie:`__Host-suyai_session=${cookie}`}});
+    assert.equal((await handlers.getFeePrices(read(other))).status,403);
+    const response=await handlers.getFeePrices(read(token));
+    assert.equal(response.status,200); assert.equal((await response.json()).current.amountCents,'3500000');
+    await pool.query(`CREATE FUNCTION fail_fee_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced failure'; END $$`);
+    await pool.query('CREATE TRIGGER fail_fee_event BEFORE INSERT ON fee_price_history FOR EACH ROW EXECUTE FUNCTION fail_fee_event()');
+    await assert.rejects(setFeePrice(pool,{actorToken:token,mode:'SCHEDULE',amountCents:4500000n}),/forced failure/);
+    assert.equal((await getFeePrices(pool,{actorToken:token})).history.length,5);
+  } finally { await pool.end(); await root.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); await root.end(); }
+});

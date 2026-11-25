@@ -1,0 +1,260 @@
+import { checkMutationOrigin } from './http-security.mjs';
+
+const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
+const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers } });
+async function readBody(request, limit = 4096) {
+  if (!request.body) throw new Error('Sin datos');
+  const reader = request.body.getReader();
+  const chunks = []; let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > limit) { await reader.cancel(); throw new Error('Datos demasiado extensos'); }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  const bytes = new Uint8Array(total); let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+}
+function getCookie(request, name) {
+  const values = (request.headers.get('cookie') ?? '').split(';').map((v) => v.trim()).filter((v) => v.startsWith(`${name}=`)).map((v) => v.slice(name.length + 1));
+  return values.length === 1 && tokenPattern.test(values[0]) ? values[0] : null;
+}
+
+export function createAuthHandlers({ origin, production, authenticate, revokeSession, getSession, changePassword, resetStudentPassword, createStudent, changeStudentStatus, listStudents, setFeePrice, getFeePrices, setDueDay, getDueDays, adjustFee, listAdjustableFees, saveKilnBatch, listKilnBatches, getKilnBatch, correctKilnItem, saveMaterial, listMaterials }) {
+  const name = production ? '__Host-suyai_session' : 'suyai_session';
+  const cookie = (value, maxAge) => `${name}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${production ? '; Secure' : ''}`;
+  const allowed = (request) => checkMutationOrigin(request, origin, production);
+  return {
+    async login(request) {
+      if (!allowed(request)) return json({ error: 'Solicitud no permitida' }, 403);
+      let body;
+      try { body = await readBody(request); } catch { return json({ error: 'Datos inválidos' }, 400); }
+      if (!body || typeof body.email !== 'string' || typeof body.password !== 'string' || Object.keys(body).some((key) => !['email', 'password'].includes(key))) return json({ error: 'Datos inválidos' }, 400);
+      try {
+        const token = await authenticate({ email: body.email, password: body.password, source: 'web-global' });
+        if (!token || !tokenPattern.test(token)) return json({ error: 'No fue posible ingresar con esos datos' }, 401);
+        return json({ ok: true }, 200, { 'Set-Cookie': cookie(token, 43200) });
+      } catch { return json({ error: 'Servicio no disponible' }, 503); }
+    },
+    async logout(request) {
+      if (!allowed(request)) return json({ error: 'Solicitud no permitida' }, 403);
+      const token = getCookie(request, name);
+      try { if (token) await revokeSession(token); }
+      catch { return json({ error: 'Servicio no disponible' }, 503); }
+      return json({ ok: true }, 200, { 'Set-Cookie': cookie('', 0) });
+    },
+    async changePassword(request) {
+      if (!allowed(request)) return json({ error: 'Solicitud no permitida' }, 403);
+      const token = getCookie(request, name);
+      if (!token) return json({ error: 'No autenticado' }, 401);
+      let body;
+      try { body = await readBody(request); } catch { return json({ error: 'Datos inválidos' }, 400); }
+      if (!body || typeof body.currentPassword !== 'string' || typeof body.newPassword !== 'string' || Object.keys(body).some((key) => !['currentPassword', 'newPassword'].includes(key))) return json({ error: 'Datos inválidos' }, 400);
+      try {
+        await changePassword(token, body.currentPassword, body.newPassword);
+        return json({ ok: true }, 200, { 'Set-Cookie': cookie('', 0) });
+      } catch (error) {
+        if (error?.code === 'SESSION') return json({ error: 'No autenticado' }, 401);
+        if (error?.code === 'LIMIT') return json({ error: 'Demasiados intentos. Intentá nuevamente más tarde.' }, 429);
+        if (error?.code === 'CREDENTIALS' || error instanceof RangeError) return json({ error: 'Revisá la contraseña actual y la nueva contraseña.' }, 400);
+        return json({ error: 'Servicio no disponible' }, 503);
+      }
+    },
+    async resetStudentPassword(request) {
+      if (!allowed(request)) return json({ error: 'Solicitud no permitida' }, 403);
+      const token = getCookie(request, name);
+      if (!token) return json({ error: 'No autenticado' }, 401);
+      let body;
+      try { body = await readBody(request); } catch { return json({ error: 'Datos inválidos' }, 400); }
+      if (!body || typeof body.studentId !== 'string' || typeof body.temporaryPassword !== 'string' || typeof body.reason !== 'string' || Object.keys(body).some((key) => !['studentId', 'temporaryPassword', 'reason'].includes(key))) return json({ error: 'Datos inválidos' }, 400);
+      try {
+        await resetStudentPassword({ actorToken: token, studentId: body.studentId, temporaryPassword: body.temporaryPassword, reason: body.reason });
+        return json({ ok: true });
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') return json({ error: 'Operación no autorizada' }, 403);
+        if (error?.code === 'STUDENT' || error instanceof RangeError) return json({ error: 'Revisá los datos ingresados.' }, 400);
+        return json({ error: 'Servicio no disponible' }, 503);
+      }
+    },
+    async createStudent(request) {
+      if (!allowed(request)) return json({ error: 'Solicitud no permitida' }, 403);
+      const token = getCookie(request, name);
+      if (!token) return json({ error: 'No autenticado' }, 401);
+      let body;
+      try { body = await readBody(request); } catch { return json({ error: 'Datos inválidos' }, 400); }
+      const keys = ['fullName', 'email', 'phone', 'initialPassword', 'enrolledOn', 'active', 'weekdays', 'feeStart'];
+      if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((key) => !keys.includes(key)) || keys.some((key) => !Object.hasOwn(body, key))) return json({ error: 'Datos inválidos' }, 400);
+      try {
+        const id = await createStudent({ actorToken: token, fullName: body.fullName, email: body.email, phone: body.phone, initialPassword: body.initialPassword, enrolledOn: body.enrolledOn, active: body.active, weekdays: body.weekdays, feeStart: body.feeStart });
+        return json({ id }, 201);
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') return json({ error: 'Operación no autorizada' }, 403);
+        if (error?.code === 'DUPLICATE') return json({ error: 'El correo ya está registrado.' }, 409);
+        if (error instanceof RangeError) return json({ error: 'Revisá los datos ingresados.' }, 400);
+        return json({ error: 'Servicio no disponible' }, 503);
+      }
+    },
+    async changeStudentStatus(request) {
+      if (!allowed(request)) return json({ error: 'Solicitud no permitida' }, 403);
+      const token = getCookie(request, name);
+      if (!token) return json({ error: 'No autenticado' }, 401);
+      let body;
+      try { body = await readBody(request); } catch { return json({ error: 'Datos inválidos' }, 400); }
+      if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.studentId !== 'string' || typeof body.action !== 'string' || Object.keys(body).some((key) => !['studentId', 'action', 'feeStart'].includes(key))) return json({ error: 'Datos inválidos' }, 400);
+      try {
+        const result = await changeStudentStatus({ actorToken: token, studentId: body.studentId, action: body.action, feeStart: body.feeStart });
+        return json(result);
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') return json({ error: 'Operación no autorizada' }, 403);
+        if (error?.code === 'STATE') return json({ error: 'La alumna ya tiene ese estado.' }, 409);
+        if (error?.code === 'STUDENT' || error instanceof RangeError) return json({ error: 'Revisá los datos ingresados.' }, 400);
+        return json({ error: 'Servicio no disponible' }, 503);
+      }
+    },
+    async listStudents(request) {
+      const token = getCookie(request, name);
+      if (!token) return json({ error: 'No autenticado' }, 401);
+      const params = new URL(request.url).searchParams;
+      const keys = ['search','status','weekday','economic','limit','offset'];
+      if ([...params.keys()].some((key) => !keys.includes(key) || params.getAll(key).length !== 1)) return json({ error: 'Filtros inválidos' }, 400);
+      const number = (key, fallback) => { const value = params.get(key); if (value === null) return fallback; if (!/^\d{1,6}$/.test(value)) throw new RangeError('Filtro inválido'); return Number(value); };
+      try {
+        const data = await listStudents({ actorToken:token, search:params.get('search') ?? '', status:params.get('status') ?? 'ALL', weekday:number('weekday', null), economic:params.get('economic') ?? 'ALL', limit:number('limit', 50), offset:number('offset', 0) });
+        return json(data);
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') return json({ error: 'Operación no autorizada' }, 403);
+        if (error instanceof RangeError) return json({ error: 'Filtros inválidos' }, 400);
+        return json({ error: 'Servicio no disponible' }, 503);
+      }
+    },
+    async getFeePrices(request) {
+      const token = getCookie(request, name);
+      if (!token) return json({ error:'No autenticado' }, 401);
+      try { return json(await getFeePrices({ actorToken:token })); }
+      catch (error) { if (error?.code === 'FORBIDDEN') return json({ error:'Operación no autorizada' },403); return json({ error:'Servicio no disponible' },503); }
+    },
+    async setFeePrice(request) {
+      if (!allowed(request)) return json({ error:'Solicitud no permitida' },403);
+      const token = getCookie(request, name);
+      if (!token) return json({ error:'No autenticado' },401);
+      let body;
+      try { body = await readBody(request); } catch { return json({ error:'Datos inválidos' },400); }
+      if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.amountCents !== 'string' || !/^(0|[1-9]\d{0,18})$/.test(body.amountCents) || !['INITIAL','SCHEDULE'].includes(body.mode) || Object.keys(body).some((key)=>!['mode','amountCents'].includes(key))) return json({ error:'Datos inválidos' },400);
+      try { await setFeePrice({ actorToken:token, mode:body.mode, amountCents:BigInt(body.amountCents) }); return json({ ok:true }); }
+      catch (error) {
+        if (error?.code === 'FORBIDDEN') return json({ error:'Operación no autorizada' },403);
+        if (error?.code === 'INITIAL') return json({ error:'Revisá la configuración inicial de la cuota.' },409);
+        if (error instanceof RangeError) return json({ error:'Datos inválidos' },400);
+        return json({ error:'Servicio no disponible' },503);
+      }
+    },
+    async getDueDays(request) {
+      const token=getCookie(request,name);
+      if (!token) return json({error:'No autenticado'},401);
+      try { return json(await getDueDays({actorToken:token})); }
+      catch(error) { if(error?.code==='FORBIDDEN') return json({error:'Operación no autorizada'},403); return json({error:'Servicio no disponible'},503); }
+    },
+    async setDueDay(request) {
+      if (!allowed(request)) return json({error:'Solicitud no permitida'},403);
+      const token=getCookie(request,name);
+      if (!token) return json({error:'No autenticado'},401);
+      let body;
+      try { body=await readBody(request); } catch { return json({error:'Datos inválidos'},400); }
+      if (!body || typeof body !== 'object' || Array.isArray(body) || !['INITIAL','SCHEDULE'].includes(body.mode) || !Number.isInteger(body.day) || body.day<1 || body.day>28 || Object.keys(body).some((key)=>!['mode','day'].includes(key))) return json({error:'Datos inválidos'},400);
+      try { await setDueDay({actorToken:token,mode:body.mode,day:body.day}); return json({ok:true}); }
+      catch(error) {
+        if(error?.code==='FORBIDDEN') return json({error:'Operación no autorizada'},403);
+        if(error?.code==='INITIAL') return json({error:'Revisá la configuración inicial del vencimiento.'},409);
+        if(error instanceof RangeError) return json({error:'Datos inválidos'},400);
+        return json({error:'Servicio no disponible'},503);
+      }
+    },
+    async listAdjustableFees(request) {
+      const token=getCookie(request,name);
+      if (!token) return json({error:'No autenticado'},401);
+      const params=new URL(request.url).searchParams;
+      if ([...params.keys()].some(key=>!['search','offset'].includes(key) || params.getAll(key).length!==1) || !/^\d{1,6}$/.test(params.get('offset') ?? '0')) return json({error:'Filtros inválidos'},400);
+      try { return json(await listAdjustableFees({actorToken:token,search:params.get('search') ?? '',offset:Number(params.get('offset') ?? '0')})); }
+      catch(error) { if(error?.code==='FORBIDDEN') return json({error:'Operación no autorizada'},403); if(error instanceof RangeError) return json({error:'Filtros inválidos'},400); return json({error:'Servicio no disponible'},503); }
+    },
+    async listMaterials(request) {
+      const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);
+      const params=new URL(request.url).searchParams;
+      if([...params.keys()].some(key=>!['search','active','offset'].includes(key)||params.getAll(key).length!==1)||!/^\d{1,6}$/.test(params.get('offset')??'0'))return json({error:'Filtros inválidos'},400);
+      try{return json(await listMaterials({actorToken:token,search:params.get('search')??'',active:params.get('active')??'ALL',offset:Number(params.get('offset')??'0')}));}
+      catch(error){if(error?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(error instanceof RangeError)return json({error:'Filtros inválidos'},400);return json({error:'Servicio no disponible'},503);}
+    },
+    async saveMaterial(request) {
+      if(!allowed(request))return json({error:'Solicitud no permitida'},403);
+      const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);
+      let body;try{body=await readBody(request);}catch{return json({error:'Datos inválidos'},400);}
+      const fields=['name','category','description','unit','customUnit','priceCents','active'];
+      if(!body||typeof body!=='object'||Array.isArray(body)||typeof body.idempotencyKey!=='string'||Object.keys(body).some(k=>!['idempotencyKey','materialId','expectedVersion','material'].includes(k))||!body.material||typeof body.material!=='object'||Array.isArray(body.material)||fields.some(k=>!Object.hasOwn(body.material,k))||Object.keys(body.material).some(k=>!fields.includes(k))||typeof body.material.priceCents!=='string'||!/^(0|[1-9]\d{0,18})$/.test(body.material.priceCents))return json({error:'Datos inválidos'},400);
+      try{return json(await saveMaterial({actorToken:token,idempotencyKey:body.idempotencyKey,materialId:body.materialId??null,expectedVersion:body.expectedVersion??null,material:{...body.material,priceCents:BigInt(body.material.priceCents)}}));}
+      catch(error){if(error?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(['VERSION','IDEMPOTENCY'].includes(error?.code))return json({error:error.message},409);if(error?.code==='MATERIAL'||error instanceof RangeError)return json({error:'Revisá los datos ingresados.'},400);return json({error:'Servicio no disponible'},503);}
+    },
+    async correctKilnItem(request) {
+      if(!allowed(request))return json({error:'Solicitud no permitida'},403);
+      const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);
+      let body;try{body=await readBody(request);}catch{return json({error:'Datos inválidos'},400);}
+      const fields=['itemId','action','amountCents','reason','idempotencyKey'];
+      if(!body||typeof body!=='object'||Array.isArray(body)||fields.some(field=>typeof body[field]!=='string')||Object.keys(body).some(key=>!fields.includes(key))||!/^(0|[1-9]\d{0,18})$/.test(body.amountCents))return json({error:'Datos inválidos'},400);
+      try{return json(await correctKilnItem({actorToken:token,itemId:body.itemId,action:body.action,amountCents:BigInt(body.amountCents),reason:body.reason,idempotencyKey:body.idempotencyKey}));}
+      catch(error){if(error?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(['PAID','INCONSISTENT','IDEMPOTENCY','VOIDED','UNCHANGED'].includes(error?.code))return json({error:error.message},409);if(error?.code==='ITEM'||error instanceof RangeError)return json({error:'Revisá los datos ingresados.'},400);return json({error:'Servicio no disponible'},503);}
+    },
+    async kilnHistory(request) {
+      const token=getCookie(request,name); if(!token)return json({error:'No autenticado'},401);
+      const params=new URL(request.url).searchParams;
+      if([...params.keys()].some(key=>!['period','offset','batchId'].includes(key)||params.getAll(key).length!==1)||!/^\d{1,6}$/.test(params.get('offset')??'0')||(params.has('batchId')&&(params.has('period')||params.has('offset'))))return json({error:'Filtros inválidos'},400);
+      try {
+        if(params.has('batchId')){const result=await getKilnBatch({actorToken:token,batchId:params.get('batchId')});return result?json(result):json({error:'Carga inexistente'},404);}
+        return json(await listKilnBatches({actorToken:token,period:params.get('period')??'',offset:Number(params.get('offset')??'0')}));
+      } catch(error){if(error?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(error instanceof RangeError)return json({error:'Filtros inválidos'},400);return json({error:'Servicio no disponible'},503);}
+    },
+    async saveKilnBatch(request) {
+      if(!allowed(request)) return json({error:'Solicitud no permitida'},403);
+      const token=getCookie(request,name); if(!token) return json({error:'No autenticado'},401);
+      let body; try {body=await readBody(request,1048576);} catch {return json({error:'Datos inválidos o demasiado extensos'},400);}
+      if(!body||typeof body!=='object'||Array.isArray(body)||typeof body.idempotencyKey!=='string'||!body.batch||Object.keys(body).some(key=>!['idempotencyKey','batch'].includes(key))) return json({error:'Datos inválidos'},400);
+      try {return json(await saveKilnBatch({actorToken:token,idempotencyKey:body.idempotencyKey,batch:body.batch}));}
+      catch(error) {
+        if(error?.code==='FORBIDDEN') return json({error:'Operación no autorizada'},403);
+        if(error?.code==='IDEMPOTENCY'||error?.code==='INACTIVE') return json({error:error.message},409);
+        if(error?.code==='STUDENT'||error instanceof RangeError) return json({error:'Revisá los datos de la carga.'},400);
+        return json({error:'Servicio no disponible'},503);
+      }
+    },
+    async adjustFee(request) {
+      if (!allowed(request)) return json({error:'Solicitud no permitida'},403);
+      const token=getCookie(request,name);
+      if (!token) return json({error:'No autenticado'},401);
+      let body;
+      try { body=await readBody(request); } catch { return json({error:'Datos inválidos'},400); }
+      const fields=['feeId','amountCents','reason','idempotencyKey'];
+      if (!body || typeof body !== 'object' || Array.isArray(body) || fields.some((field)=>typeof body[field] !== 'string') || Object.keys(body).some((key)=>!fields.includes(key)) || !/^(0|[1-9]\d{0,18})$/.test(body.amountCents)) return json({error:'Datos inválidos'},400);
+      try { return json(await adjustFee({actorToken:token,feeId:body.feeId,amountCents:BigInt(body.amountCents),reason:body.reason,idempotencyKey:body.idempotencyKey})); }
+      catch(error) {
+        if(error?.code==='FORBIDDEN') return json({error:'Operación no autorizada'},403);
+        if(error?.code==='IDEMPOTENCY') return json({error:'La clave ya fue utilizada con otros datos.'},409);
+        if(error?.code==='PAID') return json({error:'El importe no puede ser menor a lo abonado.'},409);
+        if(error?.code==='INCONSISTENT') return json({error:'El saldo requiere revisión antes del ajuste.'},409);
+        if(error?.code==='UNCHANGED') return json({error:'El importe no cambió.'},409);
+        if(error?.code==='FEE' || error instanceof RangeError) return json({error:'Revisá los datos ingresados.'},400);
+        return json({error:'Servicio no disponible'},503);
+      }
+    },
+    async session(request) {
+      const token = getCookie(request, name);
+      if (!token) return json({ error: 'No autenticado' }, 401);
+      try {
+        const current = await getSession(token);
+        if (!current) return json({ error: 'No autenticado' }, 401);
+        return json({ role: current.role, mustChangePassword: current.mustChangePassword });
+      } catch { return json({ error: 'Servicio no disponible' }, 503); }
+    },
+  };
+}

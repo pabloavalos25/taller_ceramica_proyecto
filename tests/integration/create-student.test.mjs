@@ -1,0 +1,52 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import pg from 'pg';
+import { hashPassword, verifyPassword } from '../../src/auth/passwords.mjs';
+import { createSession } from '../../src/auth/sessions.mjs';
+import { createAuthHandlers } from '../../src/auth/http-handlers.mjs';
+import { createStudent } from '../../src/students/create-student.mjs';
+const url = process.env.TEST_DATABASE_URL;
+if (!url) throw new Error('TEST_DATABASE_URL debe apuntar a una base de pruebas aislada');
+
+test('an administrator creates a student atomically with attendance and fee choice', async () => {
+  const schema = `suyai_test_${randomUUID().replaceAll('-', '')}`;
+  const root = new pg.Client({ connectionString: url }); await root.connect(); await root.query(`CREATE SCHEMA "${schema}"`);
+  const pool = new pg.Pool({ connectionString: url, options: `-c search_path=${schema}` });
+  try {
+    for (const file of ['001_initial.sql','002_student_status_history.sql','006_auth_sessions.sql','010_student_creation.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
+    const hash = await hashPassword('contraseña inicial 123');
+    const admin = (await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com',$1,'ADMIN',false) RETURNING id", [hash])).rows[0].id;
+    const actorToken = await createSession(pool, admin);
+    const input = { actorToken, fullName: ' Lucía Martínez ', email: ' LUCIA@example.com ', phone: '123456', initialPassword: 'contraseña temporal 123', enrolledOn: '2026-11-25', active: true, weekdays: [1,3,6], feeStart: 'NEXT' };
+    const id = await createStudent(pool, input);
+    const student = (await pool.query('SELECT u.email,u.password_hash,u.must_change_password,p.full_name,p.active FROM users u JOIN student_profiles p ON p.user_id=u.id WHERE u.id=$1', [id])).rows[0];
+    assert.equal(student.email, 'lucia@example.com'); assert.equal(student.full_name, 'Lucía Martínez'); assert.equal(student.must_change_password, true);
+    assert.equal(await verifyPassword(input.initialPassword, student.password_hash), true);
+    assert.deepEqual((await pool.query('SELECT weekday FROM student_attendance_days WHERE student_id=$1 ORDER BY weekday', [id])).rows.map((r) => r.weekday), [1,3,6]);
+    const start = (await pool.query("SELECT start_period = (date_trunc('month', now() AT TIME ZONE 'America/Argentina/Buenos_Aires') + interval '1 month')::date AS correct FROM student_fee_preferences WHERE student_id=$1", [id])).rows[0];
+    assert.equal(start.correct, true);
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM student_creation_events WHERE student_id=$1 AND actor_id=$2', [id, admin])).rows[0].n, 1);
+    const studentToken = await createSession(pool, id);
+    await assert.rejects(createStudent(pool, { ...input, actorToken: studentToken, email: 'b@example.com' }), /autoriz/i);
+    await assert.rejects(createStudent(pool, { ...input, email: 'lucia@example.com' }), /duplicad/i);
+    await assert.rejects(createStudent(pool, { ...input, email: 'c@example.com', weekdays: [1,1] }), /días/i);
+    await assert.rejects(createStudent(pool, { ...input, email: 'c@example.com', enrolledOn: '2026-02-30' }), /fecha/i);
+    await pool.query('UPDATE users SET must_change_password=true WHERE id=$1', [admin]);
+    await assert.rejects(createStudent(pool, { ...input, email: 'c@example.com' }), /autoriz/i);
+    await pool.query('UPDATE users SET must_change_password=false WHERE id=$1', [admin]);
+    const inactiveId = await createStudent(pool, { ...input, email: 'inactive@example.com', active: false, feeStart: 'CURRENT', weekdays: [2] });
+    const inactive = (await pool.query("SELECT p.active, f.start_period = date_trunc('month', now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS current FROM student_profiles p JOIN student_fee_preferences f ON f.student_id=p.user_id WHERE p.user_id=$1", [inactiveId])).rows[0];
+    assert.deepEqual(inactive, { active: false, current: true });
+    const handlers = createAuthHandlers({ origin:'https://suyai.example', production:true, createStudent:(data) => createStudent(pool, data) });
+    const { actorToken: ignored, ...body } = { ...input, email: 'route@example.com', feeStart:'CURRENT' };
+    const headers = { origin:'https://suyai.example', 'content-type':'application/json', cookie:`__Host-suyai_session=${actorToken}` };
+    const response = await handlers.createStudent(new Request('https://suyai.example/api/admin/students', { method:'POST', headers, body:JSON.stringify(body) }));
+    assert.equal(response.status, 201); assert.equal((await response.text()).includes(input.initialPassword), false);
+    await pool.query(`CREATE FUNCTION fail_student_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced failure'; END $$`);
+    await pool.query('CREATE TRIGGER fail_student_event BEFORE INSERT ON student_creation_events FOR EACH ROW EXECUTE FUNCTION fail_student_event()');
+    await assert.rejects(createStudent(pool, { ...input, email: 'rollback@example.com' }), /forced failure/);
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM users WHERE email='rollback@example.com'")).rows[0].n, 0);
+  } finally { await pool.end(); await root.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); await root.end(); }
+});

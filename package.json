@@ -1,0 +1,25 @@
+{
+  "name": "suyai",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test:integration": "node --test tests/integration/*.test.mjs",
+    "db:migrate": "node scripts/migrate.mjs",
+    "admin:bootstrap": "node scripts/bootstrap-admin.mjs",
+    "fees:run": "node scripts/fees-worker.mjs --once",
+    "fees:worker": "node scripts/fees-worker.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "next": "^16.4.6",
+    "pg": "^8.23.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  }
+}

@@ -1,0 +1,53 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import pg from 'pg';
+import { hashPassword } from '../../src/auth/passwords.mjs';
+import { createSession, getSession } from '../../src/auth/sessions.mjs';
+import { createAuthHandlers } from '../../src/auth/http-handlers.mjs';
+import { changeStudentStatus } from '../../src/students/change-status.mjs';
+const url = process.env.TEST_DATABASE_URL;
+if (!url) throw new Error('TEST_DATABASE_URL debe apuntar a una base de pruebas aislada');
+
+test('deactivation retains debts and sessions, and reactivation records the billing choice', async () => {
+  const schema = `suyai_test_${randomUUID().replaceAll('-', '')}`;
+  const root = new pg.Client({ connectionString: url }); await root.connect(); await root.query(`CREATE SCHEMA "${schema}"`);
+  const pool = new pg.Pool({ connectionString: url, options: `-c search_path=${schema}` });
+  try {
+    for (const file of ['001_initial.sql','002_student_status_history.sql','006_auth_sessions.sql','011_student_status_changes.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
+    const hash = await hashPassword('contraseña inicial 123');
+    const admin = (await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com',$1,'ADMIN',false) RETURNING id", [hash])).rows[0].id;
+    const student = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('ana@example.com',$1,'USER') RETURNING id", [hash])).rows[0].id;
+    await pool.query("INSERT INTO student_profiles(user_id,full_name,enrolled_on) VALUES ($1,'Ana','2026-11-25')", [student]);
+    await pool.query("INSERT INTO monthly_fees(student_id,period_year,period_month,original_cents,due_date) VALUES ($1,2026,11,3500000,'2026-11-30')", [student]);
+    const actorToken = await createSession(pool, admin); const studentToken = await createSession(pool, student);
+    await assert.rejects(changeStudentStatus(pool, { actorToken: studentToken, studentId: student, action:'DEACTIVATE' }), /autoriz/i);
+    await changeStudentStatus(pool, { actorToken, studentId: student, action:'DEACTIVATE' });
+    assert.equal((await pool.query('SELECT active FROM student_profiles WHERE user_id=$1', [student])).rows[0].active, false);
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM monthly_fees WHERE student_id=$1', [student])).rows[0].n, 1);
+    assert.notEqual(await getSession(pool, studentToken), null);
+    await assert.rejects(changeStudentStatus(pool, { actorToken, studentId: student, action:'REACTIVATE' }), /período/i);
+    await changeStudentStatus(pool, { actorToken, studentId: student, action:'REACTIVATE', feeStart:'NEXT' });
+    const events = (await pool.query("SELECT previous_active,new_active,fee_start_period = (date_trunc('month', now() AT TIME ZONE 'America/Argentina/Buenos_Aires') + interval '1 month')::date AS next FROM student_status_change_events WHERE student_id=$1 ORDER BY id", [student])).rows;
+    assert.deepEqual(events, [{ previous_active:true, new_active:false, next:null }, { previous_active:false, new_active:true, next:true }]);
+    await assert.rejects(changeStudentStatus(pool, { actorToken, studentId: student, action:'REACTIVATE', feeStart:'CURRENT' }), /estado/i);
+    const concurrent = await Promise.allSettled([changeStudentStatus(pool, { actorToken, studentId:student, action:'DEACTIVATE' }), changeStudentStatus(pool, { actorToken, studentId:student, action:'DEACTIVATE' })]);
+    assert.equal(concurrent.filter((entry) => entry.status === 'fulfilled').length, 1);
+    assert.equal(concurrent.filter((entry) => entry.status === 'rejected').length, 1);
+    await changeStudentStatus(pool, { actorToken, studentId:student, action:'REACTIVATE', feeStart:'CURRENT' });
+    const current = (await pool.query("SELECT fee_start_period = date_trunc('month', now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS current FROM student_status_change_events WHERE student_id=$1 ORDER BY id DESC LIMIT 1", [student])).rows[0];
+    assert.equal(current.current, true);
+    const handlers = createAuthHandlers({ origin:'https://suyai.example', production:true, changeStudentStatus:(data) => changeStudentStatus(pool, data) });
+    const headers = { origin:'https://suyai.example', 'content-type':'application/json', cookie:`__Host-suyai_session=${actorToken}` };
+    const update = (body, extra = {}) => new Request('https://suyai.example/api/admin/student-status', { method:'POST', headers:{ ...headers, ...extra }, body:JSON.stringify(body) });
+    assert.equal((await handlers.changeStudentStatus(update({ studentId:student, action:'DEACTIVATE' }, { origin:'https://evil.example' }))).status, 403);
+    assert.equal((await handlers.changeStudentStatus(update({ studentId:student, action:'DEACTIVATE' }))).status, 200);
+    assert.equal((await handlers.changeStudentStatus(update({ studentId:student, action:'DEACTIVATE' }))).status, 409);
+    assert.equal((await handlers.changeStudentStatus(update({ studentId:student, action:'REACTIVATE', feeStart:'CURRENT' }))).status, 200);
+    await pool.query(`CREATE FUNCTION fail_status_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced failure'; END $$`);
+    await pool.query('CREATE TRIGGER fail_status_event BEFORE INSERT ON student_status_change_events FOR EACH ROW EXECUTE FUNCTION fail_status_event()');
+    await assert.rejects(changeStudentStatus(pool, { actorToken, studentId: student, action:'DEACTIVATE' }), /forced failure/);
+    assert.equal((await pool.query('SELECT active FROM student_profiles WHERE user_id=$1', [student])).rows[0].active, true);
+  } finally { await pool.end(); await root.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); await root.end(); }
+});

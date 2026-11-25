@@ -17,6 +17,7 @@ import { saveMaterialBatch } from '../materials/batches.mjs';
 import { listMaterialBatches,getMaterialBatch } from '../materials/history.mjs';
 import { listPayableCharges,recordAuthorizedPayment,listPayments,getPayment,voidAuthorizedPayment } from '../payments/web.mjs';
 import { getStudentPortal } from '../students/portal.mjs';
+import { getAdminSummary } from '../students/admin-summary.mjs';
 import { correctMaterialItem } from '../materials/corrections.mjs';
 import { listDrafts,getDraft,saveDraft,confirmDraft } from '../drafts/store.mjs';
 import { createAuthHandlers } from './http-handlers.mjs';
@@ -57,6 +58,7 @@ export function webAuthHandlers() {
     getPayment: (input) => getPayment(pool,input),
     voidAuthorizedPayment: (input) => voidAuthorizedPayment(pool,input),
     getStudentPortal: (input) => getStudentPortal(pool,input),
+    getAdminSummary: (input) => getAdminSummary(pool,input),
     correctMaterialItem: (input) => correctMaterialItem(pool,input),
     listDrafts: (input) => listDrafts(pool,input),
     getDraft: (input) => getDraft(pool,input),

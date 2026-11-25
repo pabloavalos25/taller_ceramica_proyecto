@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sesión iniciada · SUYAI</title>
+  <link rel="stylesheet" href="../tokens.css">
+  <style>
+    * { box-sizing: border-box; }
+    body { min-height: 100vh; margin: 0; color: var(--text); background: var(--background); font-family: var(--body); line-height: 1.5; }
+    .shell { display: grid; grid-template-columns: 1fr 1fr; min-height: 100vh; }
+    .welcome { position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; padding: clamp(32px, 5vw, 76px); color: #fff; background: var(--green); }
+    .welcome::before, .welcome::after { position: absolute; right: -190px; bottom: -190px; width: 410px; height: 410px; border: 1px solid #ffffff24; border-radius: 50%; content: ''; pointer-events: none; }
+    .welcome::after { right: -130px; bottom: -130px; width: 290px; height: 290px; }
+    .brand { display: flex; align-items: center; gap: 13px; }
+    .brand img { width: 52px; height: 52px; border-radius: 50%; object-fit: contain; }
+    .brand strong { display: block; font: 400 25px/1 var(--title, Georgia, serif); letter-spacing: .11em; }
+    .brand small { display: block; margin-top: 6px; color: #d5ded1; font-size: 10px; }
+    .intro { max-width: 500px; margin: 70px 0; }
+    .tag { color: #d3dfcc; font-size: 10px; font-weight: 700; letter-spacing: .17em; text-transform: uppercase; }
+    .welcome h1 { margin: 22px 0; font: 400 clamp(44px, 5vw, 68px)/1.06 var(--title, Georgia, serif); letter-spacing: -.03em; }
+    .welcome p { max-width: 360px; color: #e0e7dd; font-size: 15px; line-height: 1.8; }
+    .divider { width: 60px; height: 1px; margin: 28px 0; background: #d5e2cfaa; }
+    .welcome footer { position: relative; z-index: 1; color: #d5ded1; font-size: 12px; }
+    .form-side { display: grid; place-items: center; padding: 56px 28px; background: var(--background); }
+    .panel { width: min(100%, 410px); }
+    .form-tag { color: #718267; font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+    .panel h2 { margin: 12px 0 10px; font: 400 clamp(36px, 4vw, 46px)/1.1 var(--title, Georgia, serif); letter-spacing: -.025em; }
+    .sub { margin: 0 0 28px; color: #6d766e; font-size: 14px; line-height: 1.7; }
+    .success { display: flex; align-items: center; gap: 10px; margin: 0 0 22px; color: #40543b; font-size: 13px; font-weight: 600; }
+    .success-icon { display: grid; width: 26px; height: 26px; flex: none; place-items: center; border-radius: 50%; color: #4c5b43; background: #e8eee4; }
+    .actions { display: grid; gap: 12px; }
+    .action { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 17px; border: 1px solid transparent; border-radius: 10px; color: #fff; background: var(--green); font-size: 14px; font-weight: 700; text-decoration: none; transition: background-color var(--motion), border-color var(--motion), transform var(--motion); }
+    .action:hover { background: #3f4d38; transform: translateY(-1px); }
+    .action-secondary { border-color: var(--border); color: #394337; background: var(--surface); }
+    .action-secondary:hover { border-color: #aab5a4; color: #33412e; background: #f3f5f1; }
+    .arrow { color: currentColor; font-size: 18px; line-height: 1; }
+    .logout { width: 100%; min-height: 48px; margin-top: 18px; border: 0; border-radius: 8px; color: #6d766e; background: transparent; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .logout:hover { color: #394337; background: #edf0eb; }
+    :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+    @media (max-width: 700px) {
+      .shell { display: block; }
+      .welcome { min-height: 0; padding: 25px 22px 28px; }
+      .brand img { width: 42px; height: 42px; }
+      .brand strong { font-size: 23px; }
+      .intro { margin: 27px 0 0; }
+      .welcome h1 { margin: 10px 0; font-size: 38px; }
+      .welcome p { margin: 0; font-size: 13px; line-height: 1.6; }
+      .divider, .welcome footer, .welcome::before, .welcome::after { display: none; }
+      .form-side { display: block; padding: 34px 22px 45px; }
+      .panel { margin: auto; }
+      .panel h2 { font-size: 36px; }
+      .sub { margin-bottom: 24px; }
+      .action { min-height: 56px; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="welcome">
+      <div class="brand"><img src="../assets/logo.png" alt="Logo de SUYAI"><div><strong data-brand-name>SUYAI</strong><small>Multiespacio cultural</small></div></div>
+      <div class="intro"><span class="tag">Multiespacio cultural · Taller de artes</span><h1>Un espacio para crear y compartir.</h1><div class="divider" aria-hidden="true"></div><p>Tu taller, tus encuentros y toda tu información en un mismo lugar.</p></div>
+      <footer>SUYAI · Multiespacio cultural</footer>
+    </section>
+    <section class="form-side">
+      <div class="panel">
+        <span class="form-tag">Tu espacio en SUYAI</span>
+        <h2>Te damos la bienvenida</h2>
+        <p class="sub">Ingresá con los datos que te proporcionó el taller.</p>
+        <p class="success" role="status"><span class="success-icon" aria-hidden="true">✓</span>Ingresaste correctamente.</p>
+        <nav class="actions" aria-label="Acciones de administración">
+          <a class="action" href="#"><span>Gestionar alumnas</span><span class="arrow" aria-hidden="true">→</span></a>
+          <a class="action action-secondary" href="#"><span>Cuidar datos de este dispositivo</span><span class="arrow" aria-hidden="true">→</span></a>
+        </nav>
+        <button class="logout" type="button">Cerrar sesión</button>
+      </div>
+    </section>
+  </main>
+  <script src="../brand.js"></script>
+</body>
+</html>

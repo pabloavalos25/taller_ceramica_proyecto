@@ -1,4 +1,5 @@
 import { checkMutationOrigin } from './http-security.mjs';
+import { studentServiceDiagnostic } from './diagnostics.mjs';
 
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers } });
@@ -24,11 +25,17 @@ function getCookie(request, name) {
   return values.length === 1 && tokenPattern.test(values[0]) ? values[0] : null;
 }
 
-export function createAuthHandlers({ origin, production, authenticate, revokeSession, getSession, changePassword, resetStudentPassword, createStudent, changeStudentStatus, listStudents, setFeePrice, getFeePrices, setDueDay, getDueDays, adjustFee, listAdjustableFees, saveKilnBatch, listKilnBatches, getKilnBatch, correctKilnItem, saveMaterial, listMaterials, saveMaterialBatch, listMaterialBatches, getMaterialBatch, listPayableCharges, recordAuthorizedPayment, listPayments, getPayment, voidAuthorizedPayment, getStudentPortal, correctMaterialItem, listDrafts, getDraft, saveDraft, confirmDraft }) {
+export function createAuthHandlers({ origin, production, authenticate, revokeSession, getSession, changePassword, resetStudentPassword, createStudent, changeStudentStatus, listStudents, setFeePrice, getFeePrices, setDueDay, getDueDays, adjustFee, listAdjustableFees, saveKilnBatch, listKilnBatches, getKilnBatch, correctKilnItem, saveMaterial, listMaterials, saveMaterialBatch, listMaterialBatches, getMaterialBatch, listPayableCharges, recordAuthorizedPayment, listPayments, getPayment, voidAuthorizedPayment, getStudentPortal, getAdminSummary, correctMaterialItem, listDrafts, getDraft, saveDraft, confirmDraft }) {
   const name = production ? '__Host-suyai_session' : 'suyai_session';
   const cookie = (value, maxAge) => `${name}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${production ? '; Secure' : ''}`;
   const allowed = (request) => checkMutationOrigin(request, origin, production);
   return {
+    async adminSummary(request) {
+      const token=getCookie(request,name);
+      if(!token)return json({error:'Sesión requerida'},401);
+      try{return json(await getAdminSummary({actorToken:token}));}
+      catch(error){return /no autorizada/i.test(error.message) ? json({error:'Operación no autorizada'},403) : json({error:'Servicio no disponible'},503);}
+    },
     async login(request) {
       if (!allowed(request)) return json({ error: 'Solicitud no permitida' }, 403);
       let body;
@@ -95,6 +102,7 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
         if (error?.code === 'FORBIDDEN') return json({ error: 'Operación no autorizada' }, 403);
         if (error?.code === 'DUPLICATE') return json({ error: 'El correo ya está registrado.' }, 409);
         if (error instanceof RangeError) return json({ error: 'Revisá los datos ingresados.' }, 400);
+        studentServiceDiagnostic('create', error);
         return json({ error: 'Servicio no disponible' }, 503);
       }
     },
@@ -128,6 +136,7 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
       } catch (error) {
         if (error?.code === 'FORBIDDEN') return json({ error: 'Operación no autorizada' }, 403);
         if (error instanceof RangeError) return json({ error: 'Filtros inválidos' }, 400);
+        studentServiceDiagnostic('list', error);
         return json({ error: 'Servicio no disponible' }, 503);
       }
     },

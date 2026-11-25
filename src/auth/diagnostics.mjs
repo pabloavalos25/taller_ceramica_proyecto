@@ -3,5 +3,6 @@ const safeCodes = new Set(['42703','42P01','23502','23503','23514','42501','28P0
 export function studentServiceDiagnostic(operation,error) {
   const safeOperation = operation === 'create' ? 'create' : 'list';
   const code = safeCodes.has(error?.code) ? error.code : 'OTHER';
-  console.error(`[student-service] operation=${safeOperation} code=${code}`);
+  const missingBranch = code === '42703' && typeof error?.message === 'string' && /column\s+(?:[a-z_][a-z0-9_]*\.)?["']?branch["']?\s+does not exist/i.test(error.message);
+  console.error(`[student-service] operation=${safeOperation} code=${code}${missingBranch ? ' missing=branch' : ''}`);
 }

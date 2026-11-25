@@ -10,3 +10,4 @@
 .list-main{max-width:1500px}.list-surface{border-radius:14px;box-shadow:0 2px 10px #303b2c08}.list-filters input,.list-filters select{border-color:#d8ddd5;background:#fff}.list-primary{font-weight:700}.list-card{border-radius:12px}
 .list-side .admin-nav-label{display:block;margin:0 10px 12px;color:#6e7f63;font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
 @media(max-width:700px){.list-side{display:block;padding:16px;background:#fff;color:var(--text);border-bottom:1px solid var(--border)}.list-side .admin-nav-label{margin:0 0 8px}.list-side nav{display:flex;overflow-x:auto;white-space:nowrap;gap:5px}.list-side nav a,.list-side nav strong{display:block;padding:9px;border-radius:9px;color:#4f5952;text-decoration:none}.list-side nav strong{background:#eef2ec;color:var(--green);box-shadow:inset 3px 0 #6e7f63}.list-mobile{display:none}}
+.list-filters label{align-content:start}.list-filters input,.list-filters select{height:46px}

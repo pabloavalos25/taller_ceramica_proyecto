@@ -86,10 +86,10 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
       if (!token) return json({ error: 'No autenticado' }, 401);
       let body;
       try { body = await readBody(request); } catch { return json({ error: 'Datos inválidos' }, 400); }
-      const keys = ['fullName', 'email', 'phone', 'initialPassword', 'enrolledOn', 'active', 'weekdays', 'feeStart'];
+      const keys = ['fullName', 'email', 'phone', 'initialPassword', 'enrolledOn', 'active', 'weekdays', 'feeStart', 'branch'];
       if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((key) => !keys.includes(key)) || keys.some((key) => !Object.hasOwn(body, key))) return json({ error: 'Datos inválidos' }, 400);
       try {
-        const id = await createStudent({ actorToken: token, fullName: body.fullName, email: body.email, phone: body.phone, initialPassword: body.initialPassword, enrolledOn: body.enrolledOn, active: body.active, weekdays: body.weekdays, feeStart: body.feeStart });
+        const id = await createStudent({ actorToken: token, fullName: body.fullName, email: body.email, phone: body.phone, initialPassword: body.initialPassword, enrolledOn: body.enrolledOn, active: body.active, weekdays: body.weekdays, feeStart: body.feeStart, branch:body.branch });
         return json({ id }, 201);
       } catch (error) {
         if (error?.code === 'FORBIDDEN') return json({ error: 'Operación no autorizada' }, 403);
@@ -119,11 +119,11 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
       const token = getCookie(request, name);
       if (!token) return json({ error: 'No autenticado' }, 401);
       const params = new URL(request.url).searchParams;
-      const keys = ['search','status','weekday','economic','limit','offset'];
+      const keys = ['search','status','weekday','economic','branch','limit','offset'];
       if ([...params.keys()].some((key) => !keys.includes(key) || params.getAll(key).length !== 1)) return json({ error: 'Filtros inválidos' }, 400);
       const number = (key, fallback) => { const value = params.get(key); if (value === null) return fallback; if (!/^\d{1,6}$/.test(value)) throw new RangeError('Filtro inválido'); return Number(value); };
       try {
-        const data = await listStudents({ actorToken:token, search:params.get('search') ?? '', status:params.get('status') ?? 'ALL', weekday:number('weekday', null), economic:params.get('economic') ?? 'ALL', limit:number('limit', 50), offset:number('offset', 0) });
+        const data = await listStudents({ actorToken:token, search:params.get('search') ?? '', status:params.get('status') ?? 'ALL', weekday:number('weekday', null), economic:params.get('economic') ?? 'ALL', branch:params.get('branch') ?? 'ALL', limit:number('limit', 50), offset:number('offset', 0) });
         return json(data);
       } catch (error) {
         if (error?.code === 'FORBIDDEN') return json({ error: 'Operación no autorizada' }, 403);

@@ -14,11 +14,12 @@ test('lists students with combined filters and effective payment balances', asyn
   const root = new pg.Client({ connectionString: url }); await root.connect(); await root.query(`CREATE SCHEMA "${schema}"`);
   const pool = new pg.Pool({ connectionString: url, options: `-c search_path=${schema}` });
   try {
-    for (const file of ['001_initial.sql','002_student_status_history.sql','003_financial_foundation.sql','004_payment_idempotency.sql','005_payment_void.sql','006_auth_sessions.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
+    for (const file of ['001_initial.sql','002_student_status_history.sql','003_financial_foundation.sql','004_payment_idempotency.sql','005_payment_void.sql','006_auth_sessions.sql','023_student_branch.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
     const user = async (email, role, change = false) => (await pool.query('INSERT INTO users(email,password_hash,role,must_change_password) VALUES ($1,$2,$3,$4) RETURNING id',[email,'hash',role,change])).rows[0].id;
     const admin = await user('admin@example.com','ADMIN');
     const ana = await user('ana@example.com','USER'); const bea = await user('bea@example.com','USER'); const cris = await user('cris@example.com','USER');
     for (const [id,name,active] of [[ana,'Ana María',true],[bea,'Bea López',true],[cris,'Cris Díaz',false]]) await pool.query("INSERT INTO student_profiles(user_id,full_name,enrolled_on,active) VALUES ($1,$2,'2026-11-25',$3)",[id,name,active]);
+    await pool.query("UPDATE student_profiles SET branch=CASE WHEN user_id=$1 THEN 'GODOY_CRUZ' ELSE 'LUJAN_DE_CUYO' END WHERE user_id IN ($1,$2)",[ana,bea]);
     for (const [id,day] of [[ana,1],[bea,1],[cris,2]]) await pool.query('INSERT INTO student_attendance_days(student_id,weekday) VALUES ($1,$2)',[id,day]);
     const charge = async (id,amount) => (await pool.query("INSERT INTO charges(student_id,category,amount_cents,description) VALUES ($1,'KILN',$2,'Pieza') RETURNING id",[id,amount])).rows[0].id;
     const a = await charge(ana,10000); const b = await charge(bea,5000);
@@ -29,6 +30,10 @@ test('lists students with combined filters and effective payment balances', asyn
     await assert.rejects(listStudents(pool,{ actorToken:studentToken }), /autoriz/i);
     const result=await listStudents(pool,{ actorToken:token });
     assert.equal(result.total,3);
+    assert.equal((await listStudents(pool,{actorToken:token,branch:'GODOY_CRUZ'})).items[0].id,ana);
+    assert.equal((await listStudents(pool,{actorToken:token,branch:'LUJAN_DE_CUYO'})).items[0].id,bea);
+    assert.equal((await listStudents(pool,{actorToken:token,branch:'UNASSIGNED'})).items[0].id,cris);
+    await assert.rejects(listStudents(pool,{actorToken:token,branch:'otra'}),/filtro/i);
     assert.deepEqual(result.items.map((s)=>[s.fullName,s.balanceCents,s.economicStatus]),[['Ana María','6000','PARTIAL'],['Bea López','5000','DEBT'],['Cris Díaz','0','CURRENT']]);
     const filtered=await listStudents(pool,{ actorToken:token, search:'ANA', status:'ACTIVE', weekday:1, economic:'PARTIAL' });
     assert.equal(filtered.total,1); assert.equal(filtered.items[0].id,ana);

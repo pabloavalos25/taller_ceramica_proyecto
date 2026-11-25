@@ -67,12 +67,12 @@ test('student creation requires session and passes identity from cookie, not the
   const token = 'A'.repeat(43); let captured;
   const handlers = createAuthHandlers({ origin: 'https://suyai.example', production: true, createStudent: async (input) => { captured = input; return 'student-id'; } });
   const headers = { origin:'https://suyai.example', 'content-type':'application/json', cookie:`__Host-suyai_session=${token}` };
-  const payload = { fullName:'Ana', email:'ana@example.com', phone:'123', initialPassword:'temporal segura', enrolledOn:'2026-11-25', active:true, weekdays:[1], feeStart:'CURRENT' };
+  const payload = { fullName:'Ana', email:'ana@example.com', phone:'123', initialPassword:'temporal segura', enrolledOn:'2026-11-25', active:true, weekdays:[1], feeStart:'CURRENT', branch:'GODOY_CRUZ' };
   const request = (data, overrides = {}) => new Request('https://suyai.example/api', { method:'POST', headers:{ ...headers, ...overrides }, body:JSON.stringify(data) });
   assert.equal((await handlers.createStudent(request(payload, { origin:'https://evil.example' }))).status, 403);
   assert.equal((await handlers.createStudent(request({ ...payload, actorToken:'forged' }))).status, 400);
   const res = await handlers.createStudent(request(payload));
-  assert.equal(res.status, 201); assert.equal(captured.actorToken, token); assert.equal((await res.text()).includes(payload.initialPassword), false);
+  assert.equal(res.status, 201); assert.equal(captured.actorToken, token); assert.equal(captured.branch,'GODOY_CRUZ'); assert.equal((await res.text()).includes(payload.initialPassword), false);
 });
 
 test('student status changes use the administrator session and require same-origin requests', async () => {
@@ -93,8 +93,8 @@ test('student listing uses the session cookie, validates filters and disables ca
   const cookie=`__Host-suyai_session=${token}`;
   assert.equal((await handlers.listStudents(new Request('https://suyai.example/api/admin/students'))).status,401);
   assert.equal((await handlers.listStudents(new Request('https://suyai.example/api/admin/students?weekday=1&weekday=2',{headers:{cookie}}))).status,400);
-  const response=await handlers.listStudents(new Request('https://suyai.example/api/admin/students?weekday=2&status=ACTIVE',{headers:{cookie}}));
-  assert.equal(response.status,200); assert.equal(response.headers.get('cache-control'),'no-store'); assert.equal(input.weekday,2); assert.equal(input.actorToken,token);
+  const response=await handlers.listStudents(new Request('https://suyai.example/api/admin/students?weekday=2&status=ACTIVE&branch=LUJAN_DE_CUYO',{headers:{cookie}}));
+  assert.equal(response.status,200); assert.equal(response.headers.get('cache-control'),'no-store'); assert.equal(input.weekday,2); assert.equal(input.branch,'LUJAN_DE_CUYO'); assert.equal(input.actorToken,token);
 });
 
 test('fee price routes use the session and exact integer cents', async () => {

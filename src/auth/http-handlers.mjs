@@ -24,7 +24,7 @@ function getCookie(request, name) {
   return values.length === 1 && tokenPattern.test(values[0]) ? values[0] : null;
 }
 
-export function createAuthHandlers({ origin, production, authenticate, revokeSession, getSession, changePassword, resetStudentPassword, createStudent, changeStudentStatus, listStudents, setFeePrice, getFeePrices, setDueDay, getDueDays, adjustFee, listAdjustableFees, saveKilnBatch, listKilnBatches, getKilnBatch, correctKilnItem, saveMaterial, listMaterials }) {
+export function createAuthHandlers({ origin, production, authenticate, revokeSession, getSession, changePassword, resetStudentPassword, createStudent, changeStudentStatus, listStudents, setFeePrice, getFeePrices, setDueDay, getDueDays, adjustFee, listAdjustableFees, saveKilnBatch, listKilnBatches, getKilnBatch, correctKilnItem, saveMaterial, listMaterials, saveMaterialBatch, listMaterialBatches, getMaterialBatch, listPayableCharges, recordAuthorizedPayment, listPayments, getPayment, voidAuthorizedPayment, getStudentPortal, correctMaterialItem, listDrafts, getDraft, saveDraft, confirmDraft }) {
   const name = production ? '__Host-suyai_session' : 'suyai_session';
   const cookie = (value, maxAge) => `${name}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${production ? '; Secure' : ''}`;
   const allowed = (request) => checkMutationOrigin(request, origin, production);
@@ -35,7 +35,7 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
       try { body = await readBody(request); } catch { return json({ error: 'Datos inválidos' }, 400); }
       if (!body || typeof body.email !== 'string' || typeof body.password !== 'string' || Object.keys(body).some((key) => !['email', 'password'].includes(key))) return json({ error: 'Datos inválidos' }, 400);
       try {
-        const token = await authenticate({ email: body.email, password: body.password, source: 'web-global' });
+        const token = await authenticate({ email: body.email, password: body.password, source: null });
         if (!token || !tokenPattern.test(token)) return json({ error: 'No fue posible ingresar con esos datos' }, 401);
         return json({ ok: true }, 200, { 'Set-Cookie': cookie(token, 43200) });
       } catch { return json({ error: 'Servicio no disponible' }, 503); }
@@ -206,6 +206,61 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
       try{return json(await correctKilnItem({actorToken:token,itemId:body.itemId,action:body.action,amountCents:BigInt(body.amountCents),reason:body.reason,idempotencyKey:body.idempotencyKey}));}
       catch(error){if(error?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(['PAID','INCONSISTENT','IDEMPOTENCY','VOIDED','UNCHANGED'].includes(error?.code))return json({error:error.message},409);if(error?.code==='ITEM'||error instanceof RangeError)return json({error:'Revisá los datos ingresados.'},400);return json({error:'Servicio no disponible'},503);}
     },
+    async draftQuery(request){
+      const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);const p=new URL(request.url).searchParams;
+      if([...p.keys()].some(k=>!['draftId','type','offset'].includes(k)||p.getAll(k).length!==1)||(p.has('draftId')&&[...p.keys()].length!==1)||(!p.has('draftId')&&(!p.has('type')||!/^\d{1,6}$/.test(p.get('offset')??'0'))))return json({error:'Filtros inválidos'},400);
+      try{if(p.has('draftId')){const result=await getDraft({actorToken:token,draftId:p.get('draftId')});return result?json(result):json({error:'Borrador inexistente'},404);}return json(await listDrafts({actorToken:token,type:p.get('type'),offset:Number(p.get('offset')??'0')}));}
+      catch(e){if(e?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(e instanceof RangeError)return json({error:'Filtros inválidos'},400);return json({error:'Servicio no disponible'},503);}
+    },
+    async draftMutation(request){
+      if(!allowed(request))return json({error:'Solicitud no permitida'},403);const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);let body;try{body=await readBody(request,1100000);}catch{return json({error:'Datos inválidos o demasiado extensos'},400);}
+      const common=['action','draftId','expectedVersion','idempotencyKey'],fields=body?.action==='SAVE'?[...common,'type','data']:common;if(!body||typeof body!=='object'||Array.isArray(body)||!['SAVE','CONFIRM'].includes(body.action)||typeof body.draftId!=='string'||typeof body.idempotencyKey!=='string'||!Number.isInteger(body.expectedVersion)||Object.keys(body).some(k=>!fields.includes(k)))return json({error:'Datos inválidos'},400);
+      try{const input={actorToken:token,draftId:body.draftId,expectedVersion:body.expectedVersion,idempotencyKey:body.idempotencyKey};return json(body.action==='SAVE'?await saveDraft({...input,type:body.type,data:body.data}):await confirmDraft(input));}
+      catch(e){if(e?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(['VERSION','CONFIRMED','IDEMPOTENCY','INACTIVE','MATERIAL'].includes(e?.code))return json({error:e.message,code:e.code},409);if(e?.code==='DRAFT'||e?.code==='STUDENT'||e instanceof RangeError||e instanceof TypeError)return json({error:'Revisá los datos del borrador.'},400);return json({error:'Servicio no disponible'},503);}
+    },
+    async correctMaterialItem(request){
+      if(!allowed(request))return json({error:'Solicitud no permitida'},403);const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);let body;try{body=await readBody(request);}catch{return json({error:'Datos inválidos'},400);}
+      const fields=['itemId','action','amountCents','reason','idempotencyKey'];if(!body||typeof body!=='object'||Array.isArray(body)||fields.some(k=>typeof body[k]!=='string')||Object.keys(body).some(k=>!fields.includes(k))||!/^(0|[1-9]\d{0,18})$/.test(body.amountCents))return json({error:'Datos inválidos'},400);
+      try{return json(await correctMaterialItem({actorToken:token,itemId:body.itemId,action:body.action,amountCents:BigInt(body.amountCents),reason:body.reason,idempotencyKey:body.idempotencyKey}));}
+      catch(e){if(e?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(['PAID','INCONSISTENT','IDEMPOTENCY','VOIDED','UNCHANGED'].includes(e?.code))return json({error:e.message},409);if(e?.code==='ITEM'||e instanceof RangeError)return json({error:'Revisá los datos ingresados.'},400);return json({error:'Servicio no disponible'},503);}
+    },
+    async studentPortal(request){
+      const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);const p=new URL(request.url).searchParams;
+      if([...p.keys()].some(k=>!['chargesOffset','paymentsOffset'].includes(k)||p.getAll(k).length!==1)||!/^\d{1,6}$/.test(p.get('chargesOffset')??'0')||!/^\d{1,6}$/.test(p.get('paymentsOffset')??'0'))return json({error:'Filtros inválidos'},400);
+      try{return json(await getStudentPortal({actorToken:token,chargesOffset:Number(p.get('chargesOffset')??'0'),paymentsOffset:Number(p.get('paymentsOffset')??'0')}));}
+      catch(e){if(e?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(e instanceof RangeError)return json({error:'Filtros inválidos'},400);return json({error:'Servicio no disponible'},503);}
+    },
+    async paymentHistory(request){
+      const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);const p=new URL(request.url).searchParams;
+      if([...p.keys()].some(k=>!['paymentId','search','status','offset'].includes(k)||p.getAll(k).length!==1)||!/^\d{1,6}$/.test(p.get('offset')??'0')||(p.has('paymentId')&&[...p.keys()].length!==1))return json({error:'Filtros inválidos'},400);
+      try{if(p.has('paymentId')){const result=await getPayment({actorToken:token,paymentId:p.get('paymentId')});return result?json(result):json({error:'Pago inexistente'},404);}return json(await listPayments({actorToken:token,search:p.get('search')??'',status:p.get('status')??'ALL',offset:Number(p.get('offset')??'0')}));}
+      catch(e){if(e?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(e instanceof RangeError)return json({error:'Filtros inválidos'},400);return json({error:'Servicio no disponible'},503);}
+    },
+    async voidPayment(request){
+      if(!allowed(request))return json({error:'Solicitud no permitida'},403);const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);let body;try{body=await readBody(request);}catch{return json({error:'Datos inválidos'},400);}
+      if(!body||typeof body!=='object'||Array.isArray(body)||typeof body.paymentId!=='string'||typeof body.reason!=='string'||Object.keys(body).some(k=>!['paymentId','reason'].includes(k)))return json({error:'Datos inválidos'},400);
+      try{return json(await voidAuthorizedPayment({actorToken:token,paymentId:body.paymentId,reason:body.reason}));}
+      catch(e){if(e?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(e instanceof RangeError)return json({error:'Revisá el motivo y los datos.'},400);if(/anulado|inexistente/i.test(e?.message??''))return json({error:e.message},409);return json({error:'Servicio no disponible'},503);}
+    },
+    async payableCharges(request){
+      const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);
+      const p=new URL(request.url).searchParams;if([...p.keys()].some(k=>!['studentId','offset'].includes(k)||p.getAll(k).length!==1)||!p.get('studentId')||!/^\d{1,6}$/.test(p.get('offset')??'0'))return json({error:'Filtros inválidos'},400);
+      try{return json(await listPayableCharges({actorToken:token,studentId:p.get('studentId'),offset:Number(p.get('offset')??'0')}));}catch(e){if(e?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(e?.code==='STUDENT'||e instanceof RangeError)return json({error:'Revisá los datos.'},400);return json({error:'Servicio no disponible'},503);}
+    },
+    async recordPayment(request){
+      if(!allowed(request))return json({error:'Solicitud no permitida'},403);const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);
+      let body;try{body=await readBody(request,131072);}catch{return json({error:'Datos inválidos o demasiado extensos'},400);}
+      if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(k=>!['studentId','idempotencyKey','method','allocations','notes'].includes(k))||!Array.isArray(body.allocations)||!body.allocations.length||body.allocations.length>500||body.allocations.some(x=>!x||Object.keys(x).some(k=>!['chargeId','amountCents'].includes(k))||typeof x.chargeId!=='string'||typeof x.amountCents!=='string'||!/^[1-9]\d{0,18}$/.test(x.amountCents)))return json({error:'Datos inválidos'},400);
+      try{return json(await recordAuthorizedPayment({actorToken:token,studentId:body.studentId,idempotencyKey:body.idempotencyKey,method:body.method,notes:body.notes??null,allocations:body.allocations.map(x=>({chargeId:x.chargeId,amount:BigInt(x.amountCents)}))}));}
+      catch(e){if(e?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(e instanceof RangeError||/idempotencia|cargo inexistente/i.test(e?.message??''))return json({error:'No se pudo registrar: revisá los importes y saldos actualizados.'},409);return json({error:'Servicio no disponible'},503);}
+    },
+    async materialHistory(request) {
+      const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);
+      const params=new URL(request.url).searchParams;
+      if([...params.keys()].some(key=>!['period','offset','batchId'].includes(key)||params.getAll(key).length!==1)||!/^\d{1,6}$/.test(params.get('offset')??'0')||(params.has('batchId')&&(params.has('period')||params.has('offset'))))return json({error:'Filtros inválidos'},400);
+      try{if(params.has('batchId')){const result=await getMaterialBatch({actorToken:token,batchId:params.get('batchId')});return result?json(result):json({error:'Carga inexistente'},404);}return json(await listMaterialBatches({actorToken:token,period:params.get('period')??'',offset:Number(params.get('offset')??'0')}));}
+      catch(error){if(error?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(error instanceof RangeError)return json({error:'Filtros inválidos'},400);return json({error:'Servicio no disponible'},503);}
+    },
     async kilnHistory(request) {
       const token=getCookie(request,name); if(!token)return json({error:'No autenticado'},401);
       const params=new URL(request.url).searchParams;
@@ -214,6 +269,14 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
         if(params.has('batchId')){const result=await getKilnBatch({actorToken:token,batchId:params.get('batchId')});return result?json(result):json({error:'Carga inexistente'},404);}
         return json(await listKilnBatches({actorToken:token,period:params.get('period')??'',offset:Number(params.get('offset')??'0')}));
       } catch(error){if(error?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(error instanceof RangeError)return json({error:'Filtros inválidos'},400);return json({error:'Servicio no disponible'},503);}
+    },
+    async saveMaterialBatch(request) {
+      if(!allowed(request))return json({error:'Solicitud no permitida'},403);
+      const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);
+      let body;try{body=await readBody(request,1048576);}catch{return json({error:'Datos inválidos o demasiado extensos'},400);}
+      if(!body||typeof body!=='object'||Array.isArray(body)||typeof body.idempotencyKey!=='string'||!body.batch||Object.keys(body).some(key=>!['idempotencyKey','batch'].includes(key)))return json({error:'Datos inválidos'},400);
+      try{return json(await saveMaterialBatch({actorToken:token,idempotencyKey:body.idempotencyKey,batch:body.batch}));}
+      catch(error){if(error?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(['IDEMPOTENCY','INACTIVE','MATERIAL'].includes(error?.code))return json({error:error.message},409);if(error?.code==='STUDENT'||error instanceof RangeError)return json({error:'Revisá los datos de la carga.'},400);return json({error:'Servicio no disponible'},503);}
     },
     async saveKilnBatch(request) {
       if(!allowed(request)) return json({error:'Solicitud no permitida'},403);

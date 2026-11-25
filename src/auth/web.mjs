@@ -13,6 +13,12 @@ import { saveKilnBatch } from '../batches/kiln-batches.mjs';
 import { listKilnBatches,getKilnBatch } from '../batches/kiln-history.mjs';
 import { correctKilnItem } from '../batches/kiln-corrections.mjs';
 import { saveMaterial,listMaterials } from '../materials/catalog.mjs';
+import { saveMaterialBatch } from '../materials/batches.mjs';
+import { listMaterialBatches,getMaterialBatch } from '../materials/history.mjs';
+import { listPayableCharges,recordAuthorizedPayment,listPayments,getPayment,voidAuthorizedPayment } from '../payments/web.mjs';
+import { getStudentPortal } from '../students/portal.mjs';
+import { correctMaterialItem } from '../materials/corrections.mjs';
+import { listDrafts,getDraft,saveDraft,confirmDraft } from '../drafts/store.mjs';
 import { createAuthHandlers } from './http-handlers.mjs';
 
 let pool;
@@ -42,6 +48,20 @@ export function webAuthHandlers() {
     correctKilnItem: (input) => correctKilnItem(pool,input),
     saveMaterial: (input) => saveMaterial(pool,input),
     listMaterials: (input) => listMaterials(pool,input),
+    saveMaterialBatch: (input) => saveMaterialBatch(pool,input),
+    listMaterialBatches: (input) => listMaterialBatches(pool,input),
+    getMaterialBatch: (input) => getMaterialBatch(pool,input),
+    listPayableCharges: (input) => listPayableCharges(pool,input),
+    recordAuthorizedPayment: (input) => recordAuthorizedPayment(pool,input),
+    listPayments: (input) => listPayments(pool,input),
+    getPayment: (input) => getPayment(pool,input),
+    voidAuthorizedPayment: (input) => voidAuthorizedPayment(pool,input),
+    getStudentPortal: (input) => getStudentPortal(pool,input),
+    correctMaterialItem: (input) => correctMaterialItem(pool,input),
+    listDrafts: (input) => listDrafts(pool,input),
+    getDraft: (input) => getDraft(pool,input),
+    saveDraft: (input) => saveDraft(pool,input),
+    confirmDraft: (input) => confirmDraft(pool,input),
   });
 }
 export function unavailable() {

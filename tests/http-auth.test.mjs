@@ -10,6 +10,14 @@ test('login rejects cross-origin and config errors without authenticating', asyn
   assert.equal(calls, 0);
 });
 
+test('login does not trust a client-supplied network address', async () => {
+  let captured;
+  const handlers = createAuthHandlers({ origin:'https://suyai.example', production:true, authenticate:async input => { captured=input; return 'A'.repeat(43); } });
+  const response = await handlers.login(new Request('https://suyai.example/api/auth/login', { method:'POST', headers:{ origin:'https://suyai.example', 'content-type':'application/json', 'x-forwarded-for':'203.0.113.1' }, body:JSON.stringify({ email:'ana@example.com', password:'secret' }) }));
+  assert.equal(response.status, 200);
+  assert.equal(captured.source, null);
+});
+
 test('login sets an HTTP-only secure cookie and logout revokes it', async () => {
   const token = 'A'.repeat(43); let revoked = null;
   const handlers = createAuthHandlers({ origin: 'https://suyai.example', production: true, authenticate: async () => token, revokeSession: async (value) => { revoked = value; } });
@@ -147,6 +155,58 @@ test('kiln batch endpoint requires the session and trusted origin',async()=>{
   assert.equal(received.actorToken,token);
 });
 
+test('material batch endpoint requires the session and trusted origin',async()=>{
+  const token='A'.repeat(43);let received;
+  const handlers=createAuthHandlers({origin:'https://suyai.example',production:true,saveMaterialBatch:async value=>{received=value;return {id:'batch'};}});
+  const request=(origin,cookie)=>new Request('https://suyai.example/api/admin/material-batches',{method:'POST',headers:{origin,'content-type':'application/json',cookie},body:JSON.stringify({idempotencyKey:'key',batch:{type:'MATERIAL'}})});
+  assert.equal((await handlers.saveMaterialBatch(request('https://evil.example',`__Host-suyai_session=${token}`))).status,403);
+  assert.equal((await handlers.saveMaterialBatch(request('https://suyai.example',''))).status,401);
+  assert.equal((await handlers.saveMaterialBatch(request('https://suyai.example',`__Host-suyai_session=${token}`))).status,200);
+  assert.equal(received.actorToken,token);
+});
+
+test('payment endpoints require trusted origin and session, and pass exact amounts',async()=>{
+  const token='A'.repeat(43);let captured;const handlers=createAuthHandlers({origin:'https://suyai.example',production:true,listPayableCharges:async input=>{captured=input;return {items:[]};},recordAuthorizedPayment:async input=>{captured=input;return {id:'payment'};}});
+  const get=cookie=>new Request('https://suyai.example/api/admin/payments?studentId=11111111-1111-4111-8111-111111111111',{headers:{cookie}});
+  assert.equal((await handlers.payableCharges(get(''))).status,401);assert.equal((await handlers.payableCharges(get(`__Host-suyai_session=${token}`))).status,200);
+  const post=(origin,cookie)=>new Request('https://suyai.example/api/admin/payments',{method:'POST',headers:{origin,cookie,'content-type':'application/json'},body:JSON.stringify({studentId:'student',idempotencyKey:'key',method:'CASH',allocations:[{chargeId:'charge',amountCents:'40000'}]})});
+  assert.equal((await handlers.recordPayment(post('https://evil.example',`__Host-suyai_session=${token}`))).status,403);
+  assert.equal((await handlers.recordPayment(post('https://suyai.example',`__Host-suyai_session=${token}`))).status,200);
+  assert.equal(captured.actorToken,token);assert.equal(captured.allocations[0].amount,40000n);
+});
+
+test('payment history and void endpoints require session and trusted origin',async()=>{
+ const token='A'.repeat(43);let captured;const handlers=createAuthHandlers({origin:'https://suyai.example',production:true,listPayments:async input=>{captured=input;return {items:[]};},getPayment:async()=>null,voidAuthorizedPayment:async input=>{captured=input;return {id:input.paymentId};}});
+ const get=cookie=>new Request('https://suyai.example/api/admin/payment-history?search=Ana&status=VOIDED',{headers:{cookie}});
+ assert.equal((await handlers.paymentHistory(get(''))).status,401);assert.equal((await handlers.paymentHistory(get(`__Host-suyai_session=${token}`))).status,200);assert.equal(captured.status,'VOIDED');
+ const post=(origin,cookie)=>new Request('https://suyai.example/api/admin/payment-history',{method:'POST',headers:{origin,cookie,'content-type':'application/json'},body:JSON.stringify({paymentId:'id',reason:'Duplicado'})});
+ assert.equal((await handlers.voidPayment(post('https://evil.example',`__Host-suyai_session=${token}`))).status,403);assert.equal((await handlers.voidPayment(post('https://suyai.example',`__Host-suyai_session=${token}`))).status,200);assert.equal(captured.actorToken,token);
+});
+
+test('student portal accepts only pagination and gets identity from session',async()=>{
+ const token='A'.repeat(43);let captured;const handlers=createAuthHandlers({origin:'https://suyai.example',production:true,getStudentPortal:async input=>{captured=input;return {profile:{name:'Ana'}};}});
+ const request=(query,cookie=`__Host-suyai_session=${token}`)=>new Request(`https://suyai.example/api/student/portal?${query}`,{headers:{cookie}});
+ assert.equal((await handlers.studentPortal(request('',''))).status,401);
+ assert.equal((await handlers.studentPortal(request('studentId=otra'))).status,400);
+ assert.equal((await handlers.studentPortal(request('chargesOffset=50&paymentsOffset=0'))).status,200);
+ assert.equal(captured.actorToken,token);assert.equal(captured.chargesOffset,50);assert.equal(Object.hasOwn(captured,'studentId'),false);
+});
+
+test('material correction requires trusted origin and passes exact cents',async()=>{
+ const token='A'.repeat(43);let captured;const handlers=createAuthHandlers({origin:'https://suyai.example',production:true,correctMaterialItem:async input=>{captured=input;return {id:'event'};}});
+ const request=(origin,cookie)=>new Request('https://suyai.example/api/admin/material-corrections',{method:'POST',headers:{origin,cookie,'content-type':'application/json'},body:JSON.stringify({itemId:'id',action:'ADJUST',amountCents:'7000',reason:'Error',idempotencyKey:'key'})});
+ assert.equal((await handlers.correctMaterialItem(request('https://evil.example',`__Host-suyai_session=${token}`))).status,403);
+ assert.equal((await handlers.correctMaterialItem(request('https://suyai.example',''))).status,401);
+ assert.equal((await handlers.correctMaterialItem(request('https://suyai.example',`__Host-suyai_session=${token}`))).status,200);assert.equal(captured.actorToken,token);assert.equal(captured.amountCents,7000n);
+});
+
+test('shared draft endpoints use session and require trusted origin for mutations',async()=>{
+ const token='A'.repeat(43);let captured;const handlers=createAuthHandlers({origin:'https://suyai.example',production:true,listDrafts:async input=>{captured=input;return {items:[]};},getDraft:async()=>null,saveDraft:async input=>{captured=input;return {version:1};},confirmDraft:async input=>{captured=input;return {batchId:'batch'};}});
+ const get=cookie=>new Request('https://suyai.example/api/admin/drafts?type=KILN',{headers:{cookie}});assert.equal((await handlers.draftQuery(get(''))).status,401);assert.equal((await handlers.draftQuery(get(`__Host-suyai_session=${token}`))).status,200);assert.equal(captured.actorToken,token);
+ const post=(origin,cookie,body)=>new Request('https://suyai.example/api/admin/drafts',{method:'POST',headers:{origin,cookie,'content-type':'application/json'},body:JSON.stringify(body)});
+ const input={action:'CONFIRM',draftId:'id',expectedVersion:1,idempotencyKey:'key'};assert.equal((await handlers.draftMutation(post('https://evil.example',`__Host-suyai_session=${token}`,input))).status,403);assert.equal((await handlers.draftMutation(post('https://suyai.example',`__Host-suyai_session=${token}`,input))).status,200);assert.equal(captured.expectedVersion,1);
+});
+
 test('kiln history validates filters and resolves identity from session',async()=>{
   let captured; const token='A'.repeat(43);
   const handlers=createAuthHandlers({origin:'https://suyai.example',production:true,listKilnBatches:async input=>{captured=input;return {items:[],hasMore:false};},getKilnBatch:async input=>{captured=input;return null;}});
@@ -156,6 +216,16 @@ test('kiln history validates filters and resolves identity from session',async()
   assert.equal((await handlers.kilnHistory(request('period=2026-11&offset=50'))).status,200);
   assert.equal(captured.actorToken,token);assert.equal(captured.period,'2026-11');assert.equal(captured.offset,50);
   assert.equal((await handlers.kilnHistory(request('batchId=123e4567-e89b-42d3-a456-426614174000'))).status,404);
+});
+
+test('material history requires a session and validates filters',async()=>{
+  const token='A'.repeat(43);let captured;
+  const handlers=createAuthHandlers({origin:'https://suyai.example',production:true,listMaterialBatches:async input=>{captured=input;return {items:[],hasMore:false};},getMaterialBatch:async()=>null});
+  const request=(q,cookie=`__Host-suyai_session=${token}`)=>new Request(`https://suyai.example/api?${q}`,{headers:{cookie}});
+  assert.equal((await handlers.materialHistory(request('',''))).status,401);
+  assert.equal((await handlers.materialHistory(request('offset=-1'))).status,400);
+  assert.equal((await handlers.materialHistory(request('period=2026-11&offset=50'))).status,200);
+  assert.equal(captured.actorToken,token);assert.equal(captured.period,'2026-11');assert.equal(captured.offset,50);
 });
 
 test('kiln correction requires same-origin, session, exact cents and allowed fields',async()=>{

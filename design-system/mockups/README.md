@@ -65,3 +65,53 @@ Visual verify: manual (25/11/2026). Comparar la pantalla de corrección y anulac
 Sistema de diseño: revisión 2 aprobada. Estado del mockup: aprobado por el usuario (25/11/2026). Presenta búsqueda, estado, listado y formulario de creación o edición; datos ficticios. Abrir `catalogo-materiales.html` en navegador para revisar escritorio y móvil. Vista previa manual: Playwright no encontró Chrome.
 
 Visual verify: manual (25/11/2026). Comparar /admin/materiales con el mockup en escritorio y móvil; revisar filtros, formulario, unidad personalizada, errores, reintentos, teclado y consola. No se realizó comparación visual automatizada.
+
+# Mockup: carga de materiales
+
+Sistema de diseño: revisión 2 aprobada. Estado: aprobado por el usuario (25/11/2026). `carga-materiales.html` presenta una propuesta de carga agrupada por alumna, con precios propuestos desde el catálogo y revisión previa; los datos y controles son ilustrativos. Abrir el archivo en un navegador para revisar escritorio y móvil. Vista previa manual (25/11/2026): Playwright no encontró Chrome; no se realizó inspección visual automatizada.
+
+Visual verify: manual (25/11/2026). Comparar `/admin/materiales/nueva` con el mockup en escritorio y móvil; revisar búsqueda de alumnas y materiales, selección, cantidades fraccionarias, precio cero, revisión, reintentos, teclado y consola. No se realizó comparación visual automatizada.
+
+# Mockup: historial de materiales
+
+Sistema de diseño: revisión 2 aprobada. Estado: aprobado por el usuario (25/11/2026). `historial-materiales.html` muestra filtro por período, cargas y detalle por alumna con datos ficticios. Abrir el archivo en un navegador para revisar en escritorio y móvil. Preview: manual (25/11/2026); Playwright no encontró Chrome.
+
+Visual verify: manual (25/11/2026). Comparar `/admin/materiales/historial` con el mockup en escritorio y móvil. Revisar filtros, paginación, detalle, saldos inconsistentes, teclado y consola; no se realizó comparación visual automatizada.
+
+# Mockup: registrar pago
+
+Sistema de diseño: revisión 2 aprobada. Estado: aprobado por el usuario (25/11/2026), junto con la implementación financiera. `registrar-pago.html` propone selección de alumna, asignación manual total o parcial por cargo, medio de pago y confirmación; controles y datos ficticios. Preview: manual (25/11/2026); abrir en un navegador para revisar escritorio y móvil.
+
+Visual verify: manual (25/11/2026). Comparar `/admin/pagos` en escritorio y móvil; revisar selección de cargos, importes, confirmación, errores y reintentos. No se realizó comparación visual automatizada. Diferencia conocida por estructura: el resumen implementado aparece debajo del formulario, mientras el mockup lo muestra a la derecha en escritorio.
+
+# Mockup: historial y anulación de pagos
+
+Sistema de diseño: revisión 2 aprobada. Estado: aprobado por el usuario (25/11/2026), junto con la implementación de la anulación financiera. `historial-pagos.html` propone consulta de pagos vigentes y anulados, detalle de asignaciones y anulación con motivo y confirmación; datos y controles ficticios. Preview: manual (25/11/2026); abrir en un navegador para revisar escritorio y móvil.
+
+Visual verify: manual (25/11/2026). El usuario confirmó que funcionó el recorrido solicitado de consulta, detalle, anulación y saldo con datos ficticios. Quedan pendientes la comparación visual completa con el mockup en escritorio y móvil, teclado, consola y reintentos; no se realizó comparación visual automatizada.
+
+# Mockup: panel de alumna
+
+Sistema de diseño: revisión 2 aprobada. Estado: aprobado por el usuario (25/11/2026), junto con el acceso a datos propios. `panel-alumna.html` propone consulta de cargos, pagos y saldos propios; datos y controles ficticios. Preview: manual (25/11/2026); abrir en navegador para revisar escritorio y móvil.
+
+Visual verify: manual parcial (25/11/2026). El usuario aprobó la revisión de `/mi-cuenta` con datos ficticios. No se confirmó explícitamente la comparación en ambos tamaños ni la revisión de saldo inconsistente, paginación, teclado y consola; no se realizó comparación visual automatizada.
+
+# Mockup: corrección de consumo de material
+
+Sistema de diseño: revisión 2 aprobada. Estado: aprobado por el usuario (25/11/2026), junto con el cambio financiero. `correccion-material.html` propone corrección de importe o anulación con motivo, confirmación e historial; datos y controles ficticios. Preview: manual (25/11/2026); abrir en navegador para revisar escritorio y móvil.
+
+Visual verify: manual parcial (25/11/2026). El usuario confirmó que funciona y aprobó la revisión de correcciones de materiales con datos ficticios. No se confirmó explícitamente la comparación en ambos tamaños ni la revisión de teclado, consola y reintentos; no se realizó comparación visual automatizada.
+
+# Mockup: borradores compartidos
+
+Sistema de diseño: revisión 2 aprobada. Estado: aprobado por el usuario (25/11/2026), junto con la confirmación que crea cargos. `borradores-compartidos.html` propone listado, edición, conflicto entre administradores y confirmación para cargas de horno; materiales tendrá un flujo equivalente. Los datos y controles son ficticios. Preview: manual (25/11/2026); abrir en navegador para revisar escritorio y móvil.
+
+Visual verify: manual pendiente (25/11/2026). Revisar listas y formularios de ambos tipos, guardado, conflictos, recuperación y confirmación en escritorio y móvil; no se realizó comparación visual automatizada.
+
+# Mockup: protección de datos del dispositivo
+
+Sistema de diseño: revisión 2 aprobada. Estado: aprobado por el usuario (25/11/2026). `proteger-datos-dispositivo.html` propone revisar cargas locales, guardarlas como borradores compartidos y resolver operaciones inciertas antes de eliminar datos del navegador. La limpieza solo abarcaría este navegador y la pestaña actual; otras pestañas y dispositivos pueden conservar datos. La copia local de una carga no debe quitarse hasta confirmar que se guardó completa en el servidor; nunca se debe borrar una operación de resultado incierto antes de resolverla. Datos y controles ficticios.
+
+Preview: manual (25/11/2026). Playwright no pudo abrir Chromium porque no está instalado en la ruta configurada. Abrir el HTML local y revisar en escritorio y móvil. Visual verify: pendiente.
+
+Visual verify: aprobado por el usuario (25/11/2026). La pantalla implementada está en `/admin/dispositivo`; no se confirmó explícitamente una comparación completa en escritorio y móvil, reintento tras fallo, bloqueo por operación pendiente, consola o solicitudes. No se pudo realizar comparación visual automatizada.

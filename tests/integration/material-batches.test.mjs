@@ -1,0 +1,53 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {readFile} from 'node:fs/promises';
+import pg from 'pg';
+import {createSession} from '../../src/auth/sessions.mjs';
+import {recordPayment,voidPayment} from '../../src/db/payments.mjs';
+import {saveMaterialBatch} from '../../src/materials/batches.mjs';
+import {listMaterialBatches,getMaterialBatch} from '../../src/materials/history.mjs';
+
+test('guarda cargos de materiales de forma atómica y conserva el precio',async()=>{
+  const url=process.env.TEST_DATABASE_URL;if(!url)throw Error('TEST_DATABASE_URL debe apuntar a una base de pruebas aislada');
+  const schema=`suyai_test_${randomUUID().replaceAll('-','')}`;const root=new pg.Client({connectionString:url});await root.connect();await root.query(`CREATE SCHEMA "${schema}"`);
+  const pool=new pg.Pool({connectionString:url,options:`-c search_path=${schema}`});
+  try{
+    for(const file of ['001_initial.sql','003_financial_foundation.sql','004_payment_idempotency.sql','005_payment_void.sql','006_auth_sessions.sql','016_kiln_batches.sql','018_material_catalog.sql','019_material_batches.sql','020_material_corrections.sql'])await pool.query(await readFile(new URL(`../../db/migrations/${file}`,import.meta.url),'utf8'));
+    const admin=(await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com','hash','ADMIN',false) RETURNING id")).rows[0].id;
+    const student=(await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('ana@example.com','hash','USER') RETURNING id")).rows[0].id;
+    await pool.query("INSERT INTO student_profiles(user_id,full_name,enrolled_on,active) VALUES ($1,'Ana','2026-01-01',true)",[student]);
+    const material=(await pool.query("INSERT INTO materials(name,category,unit,price_cents) VALUES ('Pasta','Arcilla','KG',400000) RETURNING id")).rows[0].id;
+    const token=await createSession(pool,admin);const batch={type:'MATERIAL',date:'2026-11-25',period:'2026-11',students:[{studentId:student,items:[{materialId:material,name:'Pasta',quantity:'1.5',unitPrice:'4000.00'}]}]};
+    const input={actorToken:token,idempotencyKey:randomUUID(),batch};
+    const [a,b]=await Promise.all([saveMaterialBatch(pool,input),saveMaterialBatch(pool,input)]);assert.equal(a.id,b.id);assert.equal([a,b].filter(x=>x.replayed).length,1);
+    await pool.query('UPDATE materials SET price_cents=700000 WHERE id=$1',[material]);
+    const saved=await pool.query('SELECT i.quantity::text,i.unit_price_cents::text,i.subtotal_cents::text,c.category FROM material_batch_items i JOIN charges c ON c.id=i.charge_id');
+    assert.deepEqual(saved.rows,[{quantity:'1.500',unit_price_cents:'400000',subtotal_cents:'600000',category:'MATERIAL'}]);
+    const history=await listMaterialBatches(pool,{actorToken:token,period:'2026-11'});
+    assert.equal(history.items.length,1);assert.equal(history.items[0].totalCents,'600000');
+    const detail=await getMaterialBatch(pool,{actorToken:token,batchId:a.id});
+    assert.equal(detail.students[0].items[0].unitPriceCents,'400000');
+    assert.equal(detail.students[0].items[0].quantity,'1.500');
+    const chargeId=(await pool.query('SELECT charge_id FROM material_batch_items')).rows[0].charge_id;
+    const payment=await recordPayment(pool,{actorId:admin,studentId:student,idempotencyKey:randomUUID(),method:'CASH',allocations:[{chargeId,amount:100000n}]});
+    assert.equal((await listMaterialBatches(pool,{actorToken:token})).items[0].paidCents,'100000');
+    await voidPayment(pool,{actorId:admin,paymentId:payment.id,reason:'Prueba'});
+    assert.equal((await getMaterialBatch(pool,{actorToken:token,batchId:a.id})).students[0].items[0].paidCents,'0');
+    await assert.rejects(saveMaterialBatch(pool,{...input,batch:{...batch,date:'2026-11-24'}}),/idempotencia/i);
+    const userToken=await createSession(pool,student);await assert.rejects(saveMaterialBatch(pool,{...input,idempotencyKey:randomUUID(),actorToken:userToken}),/autoriz/i);
+    await assert.rejects(listMaterialBatches(pool,{actorToken:userToken}),/autoriz/i);
+    await assert.rejects(getMaterialBatch(pool,{actorToken:userToken,batchId:a.id}),/autoriz/i);
+    assert.equal((await listMaterialBatches(pool,{actorToken:token,period:'2026-12'})).items.length,0);
+    assert.equal(await getMaterialBatch(pool,{actorToken:token,batchId:randomUUID()}),null);
+    await assert.rejects(listMaterialBatches(pool,{actorToken:token,period:'2026-13'}),RangeError);
+    await pool.query('UPDATE materials SET active=false WHERE id=$1',[material]);
+    await assert.rejects(saveMaterialBatch(pool,{...input,idempotencyKey:randomUUID()}),/disponible/i);
+    assert.equal(Number((await pool.query('SELECT count(*) FROM charges')).rows[0].count),1);
+    await pool.query('UPDATE materials SET active=true WHERE id=$1',[material]);
+    await pool.query("CREATE FUNCTION reject_material() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced failure'; END $$");
+    await pool.query('CREATE TRIGGER reject_material BEFORE INSERT ON material_batch_items FOR EACH ROW EXECUTE FUNCTION reject_material()');
+    await assert.rejects(saveMaterialBatch(pool,{...input,idempotencyKey:randomUUID()}),/forced failure/);
+    assert.equal(Number((await pool.query('SELECT count(*) FROM charges')).rows[0].count),1);
+  }finally{await pool.end();await root.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);await root.end();}
+});

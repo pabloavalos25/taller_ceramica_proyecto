@@ -5,9 +5,10 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const maxCents = 9223372036854775807n;
 
 // actorId must come from a verified server session; this function does not authenticate callers.
-export async function recordPayment(pool, request) {
-  const { actorId, studentId, idempotencyKey, method, allocations, notes = null } = request;
-  if (![actorId, studentId, idempotencyKey].every((id) => typeof id === 'string' && uuid.test(id)) || !['CASH', 'TRANSFER', 'MERCADO_PAGO', 'OTHER'].includes(method) || !Array.isArray(allocations) || !allocations.length || allocations.length > 500 || (notes !== null && (typeof notes !== 'string' || notes.length > 2000))) throw new RangeError('Datos de pago inválidos');
+export async function recordPayment(pool, request, authorize = null) {
+  const { studentId, idempotencyKey, method, allocations, notes = null } = request;
+  let {actorId}=request;
+  if ((!authorize&&(typeof actorId!=='string'||!uuid.test(actorId))) || ![studentId, idempotencyKey].every((id) => typeof id === 'string' && uuid.test(id)) || !['CASH', 'TRANSFER', 'MERCADO_PAGO', 'OTHER'].includes(method) || !Array.isArray(allocations) || !allocations.length || allocations.length > 500 || (notes !== null && (typeof notes !== 'string' || notes.length > 2000))) throw new RangeError('Datos de pago inválidos');
   const lines = allocations.map(({ chargeId, amount }) => {
     if (typeof chargeId !== 'string' || !uuid.test(chargeId) || typeof amount !== 'bigint' || amount <= 0n || amount > maxCents) throw new RangeError('Asignación inválida');
     return { chargeId: chargeId.toLowerCase(), amount };
@@ -15,10 +16,12 @@ export async function recordPayment(pool, request) {
   if (new Set(lines.map((line) => line.chargeId)).size !== lines.length) throw new RangeError('Cargo duplicado');
   const total = lines.reduce((sum, line) => sum + line.amount, 0n);
   if (total > maxCents) throw new RangeError('Importe demasiado grande');
-  const fingerprint = createHash('sha256').update(JSON.stringify({ actorId: actorId.toLowerCase(), studentId: studentId.toLowerCase(), method, notes, lines: lines.map(({ chargeId, amount }) => [chargeId, amount.toString()]) })).digest('hex');
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    if(authorize)actorId=await authorize(client);
+    if(typeof actorId!=='string'||!uuid.test(actorId))throw new Error('Operación no autorizada');
+    const fingerprint = createHash('sha256').update(JSON.stringify({ actorId: actorId.toLowerCase(), studentId: studentId.toLowerCase(), method, notes, lines: lines.map(({ chargeId, amount }) => [chargeId, amount.toString()]) })).digest('hex');
     const authorized = await client.query("SELECT id FROM users WHERE id = $1 AND role = 'ADMIN' FOR SHARE", [actorId]);
     if (!authorized.rowCount) throw new Error('Operación no autorizada');
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended('suyai-payment:' || $1::text, 0))", [idempotencyKey.toLowerCase()]);
@@ -49,12 +52,14 @@ export async function recordPayment(pool, request) {
 }
 
 // Both payment creation and voiding must lock affected charges before changing effective balances.
-export async function voidPayment(pool, { actorId, paymentId, reason }) {
-  if (![actorId, paymentId].every((id) => typeof id === 'string' && uuid.test(id)) || typeof reason !== 'string' || !reason.trim() || reason.trim().length > 2000) throw new RangeError('Identificador o motivo inválido');
+export async function voidPayment(pool, { actorId, paymentId, reason }, authorize = null) {
+  if ((!authorize&&(typeof actorId!=='string'||!uuid.test(actorId))) || typeof paymentId!=='string'||!uuid.test(paymentId) || typeof reason !== 'string' || !reason.trim() || reason.trim().length > 2000) throw new RangeError('Identificador o motivo inválido');
   const normalizedReason = reason.trim();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    if(authorize)actorId=await authorize(client);
+    if(typeof actorId!=='string'||!uuid.test(actorId))throw new Error('Operación no autorizada');
     const authorized = await client.query("SELECT id FROM users WHERE id = $1 AND role = 'ADMIN' FOR SHARE", [actorId]);
     if (!authorized.rowCount) throw new Error('Operación no autorizada');
     const payment = await client.query('SELECT id FROM payments WHERE id = $1 FOR UPDATE', [paymentId]);

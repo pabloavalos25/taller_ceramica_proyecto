@@ -1,4 +1,9 @@
 import {parseArsCents} from '../fees/amounts.mjs';
+export function focusMaterialForm(element){
+  if(!element)return;
+  element.scrollIntoView({block:'start'});
+  element.querySelector('input')?.focus({preventScroll:true});
+}
 export function prepareMaterial(form){
   if(!form||typeof form.name!=='string'||!form.name.trim()||form.name.trim().length>200)throw new RangeError('Ingresá un nombre válido.');
   if(typeof form.category!=='string'||!form.category.trim()||form.category.trim().length>120)throw new RangeError('Ingresá una categoría válida.');

@@ -2,5 +2,7 @@
 .npm-cache/
 .next/
 .env
-.env.local
+.env.*
+!.env.example
 .test-postgres/
+.test-postgres-*/

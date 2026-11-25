@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
 import { hashPassword } from '../../src/auth/passwords.mjs';
@@ -19,11 +19,17 @@ test('login normalizes emails, issues sessions, and rate-limits failed attempts'
     for (const file of ['001_initial.sql','006_auth_sessions.sql','007_login_throttle.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
     const hash = await hashPassword('contraseña segura 123');
     const id = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('ana@example.com',$1,'USER') RETURNING id", [hash])).rows[0].id;
+    const globalKey = createHash('sha256').update('source:web-global').digest('hex');
+    await pool.query('INSERT INTO login_throttle(bucket,failures) VALUES ($1,20)', [globalKey]);
+    const independent = await authenticate(pool, { email:'ana@example.com', password:'contraseña segura 123', source:null });
+    assert.equal((await getSession(pool, independent)).userId, id);
+    await pool.query('DELETE FROM auth_sessions');
     assert.equal(await authenticate(pool, { email: 'ANA@EXAMPLE.COM ', password: 'incorrecta', source: 'test-1' }), null);
     const token = await authenticate(pool, { email: ' ANA@example.com ', password: 'contraseña segura 123', source: 'test-1' });
     assert.equal((await getSession(pool, token)).userId, id);
     assert.equal(await authenticate(pool, { email: 'unknown@example.com', password: 'incorrecta', source: 'test-2' }), null);
     for (let i = 0; i < 5; i++) assert.equal(await authenticate(pool, { email: 'ana@example.com', password: 'incorrecta', source: 'test-3' }), null);
+    assert.equal(await authenticate(pool, { email: 'ana@example.com', password: 'contraseña segura 123', source: null }), null);
     assert.equal(await authenticate(pool, { email: 'ana@example.com', password: 'contraseña segura 123', source: 'test-3' }), null);
     assert.equal((await pool.query('SELECT count(*)::int AS count FROM auth_sessions')).rows[0].count, 1);
     await pool.query("UPDATE login_throttle SET window_started_at = now() - interval '16 minutes'");

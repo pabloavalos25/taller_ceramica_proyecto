@@ -28,6 +28,17 @@ test('lists students with combined filters and effective payment balances', asyn
     const cancelled = await recordPayment(pool,{ actorId:admin, studentId:bea, idempotencyKey:randomUUID(), method:'CASH', allocations:[{chargeId:b,amount:5000n}] });
     await voidPayment(pool,{ actorId:admin,paymentId:cancelled.id,reason:'Error' });
     const token=await createSession(pool,admin), studentToken=await createSession(pool,ana);
+    const {getDashboardCounts}=await import('../../src/students/dashboard-counts.mjs');
+    await assert.rejects(getDashboardCounts(pool,{actorToken:studentToken}),/autoriz/i);
+    const initial=await getDashboardCounts(pool,{actorToken:token});
+    assert.deepEqual(initial,{active:2,inactive:1,debt:2,days:{GODOY_CRUZ:[1,0,0,0,0,0],LUJAN_DE_CUYO:[1,0,0,0,0,0]}});
+    for(const branch of ['GODOY_CRUZ','LUJAN_DE_CUYO'])for(let weekday=1;weekday<=6;weekday++)assert.equal(initial.days[branch][weekday-1],(await listStudents(pool,{actorToken:token,status:'ACTIVE',branch,weekday,limit:1})).total);
+    const teacher=await user('teacher@example.com','ADMIN');
+    await pool.query("INSERT INTO admin_profiles(user_id,display_name,access_level) VALUES ($1,'Docente','TEACHER')",[teacher]);
+    const teacherToken=await createSession(pool,teacher);
+    assert.deepEqual(await getDashboardCounts(pool,{actorToken:teacherToken}),initial);
+    await pool.query('UPDATE admin_profiles SET active=false WHERE user_id=$1',[teacher]);
+    await assert.rejects(getDashboardCounts(pool,{actorToken:teacherToken}),/autoriz/i);
     await assert.rejects(listStudents(pool,{ actorToken:studentToken }), /autoriz/i);
     const result=await listStudents(pool,{ actorToken:token });
     assert.equal(result.total,3);
@@ -46,9 +57,13 @@ test('lists students with combined filters and effective payment balances', asyn
     const inconsistentPayment = (await pool.query("INSERT INTO payments(student_id,amount_cents,method,recorded_by) VALUES ($1,7000,'CASH',$2) RETURNING id", [bea,admin])).rows[0].id;
     await pool.query('INSERT INTO payment_allocations(payment_id,charge_id,student_id,amount_cents) VALUES ($1,$2,$3,7000)', [inconsistentPayment,b,bea]);
     assert.equal((await listStudents(pool,{ actorToken:token, search:'bea' })).items[0].economicStatus, 'INCONSISTENT');
+    const afterOverpayment=await getDashboardCounts(pool,{actorToken:token});
+    assert.equal(afterOverpayment.debt,1);
+    assert.equal(afterOverpayment.debt,(await listStudents(pool,{actorToken:token,status:'ACTIVE',economic:'DEBT',limit:1})).total);
     await pool.query("INSERT INTO monthly_fees(student_id,period_year,period_month,original_cents,due_date) VALUES ($1,2026,11,3500000,'2026-11-30')", [cris]);
     assert.equal((await listStudents(pool,{ actorToken:token, search:'cris' })).items[0].economicStatus, 'INCONSISTENT');
     await pool.query('UPDATE users SET must_change_password=true WHERE id=$1', [admin]);
     await assert.rejects(listStudents(pool,{ actorToken:token }), /autoriz/i);
+    await assert.rejects(getDashboardCounts(pool,{actorToken:token}),/autoriz/i);
   } finally { await pool.end(); await root.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); await root.end(); }
 });

@@ -6,6 +6,7 @@ import { resetStudentPassword } from './reset-student-password.mjs';
 import { createStudent } from '../students/create-student.mjs';
 import { changeStudentStatus } from '../students/change-status.mjs';
 import { listStudents } from '../students/list-students.mjs';
+import { getDashboardCounts } from '../students/dashboard-counts.mjs';
 import { setFeePrice, getFeePrices } from '../fees/prices.mjs';
 import { initializeDueDay, scheduleDueDay, getDueDays } from '../fees/due-settings.mjs';
 import { adjustFee, listAdjustableFees } from '../fees/adjust-fee.mjs';
@@ -43,6 +44,7 @@ export function webAuthHandlers() {
     createStudent: (input) => createStudent(pool, input),
     changeStudentStatus: (input) => changeStudentStatus(pool, input),
     listStudents: async (input) => {await ensureFeesForSession(input.actorToken,'ADMIN');return listStudents(pool,input);},
+    getDashboardCounts: async (input) => {await ensureFeesForSession(input.actorToken,'ADMIN');return getDashboardCounts(pool,input);},
     setFeePrice: (input) => setFeePrice(pool, input),
     getFeePrices: (input) => getFeePrices(pool, input),
     setDueDay: ({ mode, ...input }) => mode === 'INITIAL' ? initializeDueDay(pool,input) : scheduleDueDay(pool,input),

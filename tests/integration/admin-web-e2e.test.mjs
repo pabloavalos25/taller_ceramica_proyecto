@@ -20,12 +20,14 @@ test('isolated web login, teacher permissions, assignment and deactivation',asyn
   assert.ok(ready,'servidor local no inició');
   async function login(email){const response=await fetch(`${base}/api/auth/login`,{method:'POST',headers:{origin,'content-type':'application/json'},body:JSON.stringify({email,password})});assert.equal(response.status,200);return response.headers.get('set-cookie').split(';')[0];}
   const a=await login('a@example.test'),t=await login('t@example.test');
+  assert.equal((await fetch(`${base}/api/admin/dashboard-counts`)).status,401);
   const dashboard=await fetch(`${base}/admin`,{headers:{cookie:a}});assert.equal(dashboard.status,200);assert.match(await dashboard.text(),/Te damos la bienvenida, Abril/);
   const summary=await fetch(`${base}/api/admin/summary`,{headers:{cookie:t}});assert.equal(summary.status,200);const teacherSummary=await summary.json();for(const field of ['monthlyIncome','incomeCents','outstandingCents','inconsistent'])assert.equal(Object.hasOwn(teacherSummary,field),false);
   const principalSummary=await fetch(`${base}/api/admin/summary`,{headers:{cookie:a}});assert.equal(principalSummary.status,200);const principalData=await principalSummary.json();for(const field of ['monthlyIncome','incomeCents','outstandingCents','inconsistent'])assert.equal(Object.hasOwn(principalData,field),true);
   const price=await fetch(`${base}/api/admin/fee-tiers`,{method:'POST',headers:{cookie:t,origin,'content-type':'application/json'},body:JSON.stringify({tiers:[{startDay:1,amountCents:'1000'}]})});assert.equal(price.status,403);
   const student={fullName:'Alumna',email:'s@example.test',phone:'123',initialPassword:'TemporalSegura_123!',enrolledOn:'2026-11-26',active:true,weekdays:[1],feeStart:'CURRENT',branch:'GODOY_CRUZ',teacherId:teacher};
   const created=await fetch(`${base}/api/admin/students`,{method:'POST',headers:{cookie:a,origin,'content-type':'application/json'},body:JSON.stringify(student)});assert.equal(created.status,201);const id=(await created.json()).id;
+  for(const cookie of [a,t]){const countsResponse=await fetch(`${base}/api/admin/dashboard-counts`,{headers:{cookie}});assert.equal(countsResponse.status,200);const counts=await countsResponse.json();assert.equal(counts.active,1);assert.deepEqual(counts.days.GODOY_CRUZ,[1,0,0,0,0,0]);assert.deepEqual(counts.days.LUJAN_DE_CUYO,[0,0,0,0,0,0]);}
   const filtered=await fetch(`${base}/api/admin/students?teacherId=${teacher}`,{headers:{cookie:a}});assert.equal(filtered.status,200);assert.ok((await filtered.json()).items.some(item=>item.id===id));
   const material=(await pool.query("INSERT INTO materials(name,category,unit,price_cents) VALUES ('Arcilla','Material','KG',5000) RETURNING id")).rows[0].id;
   const postBatch=(path,batch)=>fetch(`${base}/api/admin/${path}`,{method:'POST',headers:{cookie:t,origin,'content-type':'application/json'},body:JSON.stringify({idempotencyKey:randomUUID(),batch})});
@@ -39,6 +41,7 @@ test('isolated web login, teacher permissions, assignment and deactivation',asyn
   assert.equal((await pool.query('SELECT unit_price_cents::text FROM material_batch_items')).rows[0].unit_price_cents,'5000');
   const revoke=await fetch(`${base}/api/admin/teachers`,{method:'DELETE',headers:{cookie:a,origin,'content-type':'application/json'},body:JSON.stringify({teacherId:teacher})});assert.equal(revoke.status,200);
   assert.equal((await fetch(`${base}/api/auth/session`,{headers:{cookie:t}})).status,401);
+  assert.equal((await fetch(`${base}/api/admin/dashboard-counts`,{headers:{cookie:t}})).status,403);
   assert.equal((await pool.query('SELECT teacher_id FROM student_profiles WHERE user_id=$1',[id])).rows[0].teacher_id,teacher);
  }finally{if(server){server.kill();await new Promise(resolve=>{if(server.exitCode!==null)resolve();else server.once('exit',resolve);});}await pool.end();await root.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);await root.end();}
 });

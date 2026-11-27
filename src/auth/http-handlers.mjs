@@ -25,7 +25,7 @@ function getCookie(request, name) {
   return values.length === 1 && tokenPattern.test(values[0]) ? values[0] : null;
 }
 
-export function createAuthHandlers({ origin, production, authenticate, revokeSession, getSession, changePassword, resetStudentPassword, createStudent, changeStudentStatus, listStudents, setFeePrice, getFeePrices, getFeeTierSchedules, scheduleFeeTiers, setDueDay, getDueDays, adjustFee, listAdjustableFees, saveKilnBatch, listKilnBatches, getKilnBatch, correctKilnItem, saveMaterial, listMaterials, saveMaterialBatch, listMaterialBatches, getMaterialBatch, listPayableCharges, recordAuthorizedPayment, listPayments, getPayment, voidAuthorizedPayment, getStudentPortal, getAdminSummary, correctMaterialItem, listDrafts, getDraft, saveDraft, confirmDraft, createTeacher, listTeachers, deactivateTeacher, assignStudentTeacher, listStudentTeacherHistory }) {
+export function createAuthHandlers({ origin, production, authenticate, revokeSession, getSession, changePassword, resetStudentPassword, createStudent, changeStudentStatus, listStudents, getDashboardCounts, setFeePrice, getFeePrices, getFeeTierSchedules, scheduleFeeTiers, setDueDay, getDueDays, adjustFee, listAdjustableFees, saveKilnBatch, listKilnBatches, getKilnBatch, correctKilnItem, saveMaterial, listMaterials, saveMaterialBatch, listMaterialBatches, getMaterialBatch, listPayableCharges, recordAuthorizedPayment, listPayments, getPayment, voidAuthorizedPayment, getStudentPortal, getAdminSummary, correctMaterialItem, listDrafts, getDraft, saveDraft, confirmDraft, createTeacher, listTeachers, deactivateTeacher, assignStudentTeacher, listStudentTeacherHistory }) {
   const name = production ? '__Host-suyai_session' : 'suyai_session';
   const cookie = (value, maxAge) => `${name}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${production ? '; Secure' : ''}`;
   const allowed = (request) => checkMutationOrigin(request, origin, production);
@@ -164,6 +164,12 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
         if (error?.code === 'STUDENT' || error instanceof RangeError) return json({ error: 'Revisá los datos ingresados.' }, 400);
         return json({ error: 'Servicio no disponible' }, 503);
       }
+    },
+    async dashboardCounts(request) {
+      const token=getCookie(request,name);
+      if(!token)return json({error:'No autenticado'},401);
+      try{return json(await getDashboardCounts({actorToken:token}));}
+      catch(error){if(error?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);return json({error:'Servicio no disponible'},503);}
     },
     async listStudents(request) {
       const token = getCookie(request, name);

@@ -1,0 +1,43 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { readdir,readFile } from 'node:fs/promises';
+import pg from 'pg';
+import { createSession } from '../../src/auth/sessions.mjs';
+import { setFeePrice } from '../../src/fees/prices.mjs';
+import { scheduleFeeTiers } from '../../src/fees/tier-schedules.mjs';
+import { initializeDueDay } from '../../src/fees/due-settings.mjs';
+import { saveMaterial } from '../../src/materials/catalog.mjs';
+import { adjustFee } from '../../src/fees/adjust-fee.mjs';
+import { saveMaterialBatch } from '../../src/materials/batches.mjs';
+import { correctMaterialItem } from '../../src/materials/corrections.mjs';
+const url=process.env.TEST_DATABASE_URL;
+if(!url)throw new Error('TEST_DATABASE_URL debe apuntar a base aislada');
+test('teachers cannot change fees, tiers, due day or material prices',async()=>{
+ const schema=`suyai_test_${randomUUID().replaceAll('-','')}`,root=new pg.Client({connectionString:url}); await root.connect(); await root.query(`CREATE SCHEMA "${schema}"`);
+ const pool=new pg.Pool({connectionString:url,options:`-c search_path=${schema}`});
+ try{
+  const dir=new URL('../../db/migrations/',import.meta.url);
+  for(const file of (await readdir(dir)).filter(name=>name.endsWith('.sql')).sort())await pool.query(await readFile(new URL(file,dir),'utf8'));
+  const a=(await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('a@example.test','hash','ADMIN',false) RETURNING id")).rows[0].id;
+  const t=(await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('t@example.test','hash','ADMIN',false) RETURNING id")).rows[0].id;
+  await pool.query("INSERT INTO admin_profiles(user_id,display_name,access_level) VALUES ($1,'Abril','PRINCIPAL'),($2,'Profe','TEACHER')",[a,t]);
+  const principal=await createSession(pool,a),teacher=await createSession(pool,t);
+  const material={name:'Arcilla',category:'Material',description:null,unit:'KG',customUnit:null,priceCents:5000n,active:true};
+  await assert.rejects(setFeePrice(pool,{actorToken:teacher,mode:'INITIAL',amountCents:1000n}),/autoriz/i);
+  await assert.rejects(scheduleFeeTiers(pool,{actorToken:teacher,tiers:[{startDay:1,amountCents:'4500000'}]}),/autoriz/i);
+  await assert.rejects(initializeDueDay(pool,{actorToken:teacher,day:10}),/autoriz/i);
+  await assert.rejects(adjustFee(pool,{actorToken:teacher,feeId:randomUUID(),amountCents:1000n,reason:'Corrección',idempotencyKey:randomUUID()}),/autoriz/i);
+  await assert.rejects(saveMaterial(pool,{actorToken:teacher,idempotencyKey:randomUUID(),material}),/autoriz/i);
+  const result=await saveMaterial(pool,{actorToken:principal,idempotencyKey:randomUUID(),material});
+  assert.ok(result.id);
+  const s=(await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('s@example.test','hash','USER') RETURNING id")).rows[0].id;
+  await pool.query("INSERT INTO student_profiles(user_id,full_name,enrolled_on) VALUES ($1,'Alumna',current_date)",[s]);
+  const batch={type:'MATERIAL',date:'2026-11-25',period:'2026-11',students:[{studentId:s,items:[{materialId:result.id,name:'Arcilla',quantity:'1',unitPrice:'1.00'}]}]};
+  await assert.rejects(saveMaterialBatch(pool,{actorToken:teacher,idempotencyKey:randomUUID(),batch}),/precio/i);
+  batch.students[0].items[0].unitPrice='50.00';
+  await saveMaterialBatch(pool,{actorToken:teacher,idempotencyKey:randomUUID(),batch});
+  const item=(await pool.query('SELECT id FROM material_batch_items LIMIT 1')).rows[0].id;
+  await assert.rejects(correctMaterialItem(pool,{actorToken:teacher,itemId:item,action:'ADJUST',amountCents:1000n,reason:'Corrección',idempotencyKey:randomUUID()}),/autoriz/i);
+ }finally{await pool.end();await root.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);await root.end();}
+});

@@ -15,9 +15,9 @@ test('administrator resets student password with audit and revokes prior session
   const root = new pg.Client({ connectionString: url }); await root.connect(); await root.query(`CREATE SCHEMA "${schema}"`);
   const pool = new pg.Pool({ connectionString: url, options: `-c search_path=${schema}` });
   try {
-    for (const file of ['001_initial.sql','006_auth_sessions.sql','008_password_change_throttle.sql','009_student_password_reset.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
+    for (const file of ['001_initial.sql','006_auth_sessions.sql','008_password_change_throttle.sql','009_student_password_reset.sql','025_admin_profiles.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
     const hash = await hashPassword('contraseña original 123');
-    const admin = (await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com',$1,'ADMIN',false) RETURNING id", [hash])).rows[0].id;
+    const admin = (await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com',$1,'ADMIN',false) RETURNING id", [hash])).rows[0].id; await pool.query("INSERT INTO admin_profiles(user_id,display_name,access_level) VALUES ($1,'Principal','PRINCIPAL')",[admin]);
     const student = (await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('ana@example.com',$1,'USER',false) RETURNING id", [hash])).rows[0].id;
     await pool.query("INSERT INTO student_profiles(user_id,full_name,enrolled_on,active) VALUES ($1,'Ana','2026-11-25',false)", [student]);
     const adminToken = await createSession(pool, admin); const studentToken = await createSession(pool, student);

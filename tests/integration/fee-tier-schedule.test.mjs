@@ -13,8 +13,8 @@ test('la administradora consulta valores iniciales y programa valores futuros si
   const schema=`suyai_test_${randomUUID().replaceAll('-','')}`,root=new pg.Client({connectionString:url});await root.connect();await root.query(`CREATE SCHEMA "${schema}"`);
   const pool=new pg.Pool({connectionString:url,options:`-c search_path=${schema}`});
   try {
-    for(const file of ['001_initial.sql','003_financial_foundation.sql','006_auth_sessions.sql','012_fee_price_history.sql','013_fee_due_day_history.sql','015_fee_adjustments.sql','024_fee_tier_schedules.sql'])await pool.query(await readFile(new URL(`../../db/migrations/${file}`,import.meta.url),'utf8'));
-    const admin=(await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@test.invalid','hash','ADMIN',false) RETURNING id")).rows[0].id;
+    for(const file of ['001_initial.sql','003_financial_foundation.sql','006_auth_sessions.sql','012_fee_price_history.sql','013_fee_due_day_history.sql','015_fee_adjustments.sql','024_fee_tier_schedules.sql','025_admin_profiles.sql'])await pool.query(await readFile(new URL(`../../db/migrations/${file}`,import.meta.url),'utf8'));
+    const admin=(await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@test.invalid','hash','ADMIN',false) RETURNING id")).rows[0].id; await pool.query("INSERT INTO admin_profiles(user_id,display_name,access_level) VALUES ($1,'Principal','PRINCIPAL')",[admin]);
     const student=(await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('student@test.invalid','hash','USER',false) RETURNING id")).rows[0].id;
     const adminToken=await createSession(pool,admin),studentToken=await createSession(pool,student);
     await assert.rejects(getFeeTierSchedules(pool,{actorToken:studentToken}),/autoriz/i);

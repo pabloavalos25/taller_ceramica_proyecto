@@ -2,6 +2,36 @@
 import assert from 'node:assert/strict';
 import { createAuthHandlers } from '../src/auth/http-handlers.mjs';
 
+test('session response carries only the administrator display identity and access level',async()=>{
+  const token='A'.repeat(43);
+  const handlers=createAuthHandlers({origin:'https://suyai.example',production:true,getSession:async()=>({role:'ADMIN',mustChangePassword:false,displayName:'Abril',accessLevel:'PRINCIPAL',userId:'private-id'})});
+  const response=await handlers.session(new Request('https://suyai.example/api/auth/session',{headers:{cookie:`__Host-suyai_session=${token}`}}));
+  assert.deepEqual(await response.json(),{role:'ADMIN',mustChangePassword:false,displayName:'Abril',accessLevel:'PRINCIPAL'});
+});
+
+test('teacher administration requires same-origin sessions and does not return passwords',async()=>{
+ const token='A'.repeat(43),secret='Temporal-segura-348!';let input;
+ const handlers=createAuthHandlers({origin:'https://suyai.example',production:true,createTeacher:async x=>{input=x;return 'new-id';},listTeachers:async()=>({items:[]}),deactivateTeacher:async()=>{}});
+ const url='https://suyai.example/api/admin/teachers',cookie=`__Host-suyai_session=${token}`;
+ const body=JSON.stringify({displayName:'Ana',email:'ana@example.test',temporaryPassword:secret});
+ assert.equal((await handlers.teachers(new Request(url,{method:'POST',headers:{cookie,origin:'https://evil.example','content-type':'application/json'},body}))).status,403);
+ assert.equal((await handlers.teachers(new Request(url))).status,401);
+ const response=await handlers.teachers(new Request(url,{method:'POST',headers:{cookie,origin:'https://suyai.example','content-type':'application/json'},body}));
+ assert.equal(response.status,201);assert.equal(input.actorToken,token);assert.equal((await response.text()).includes(secret),false);
+});
+
+test('student reassignment uses authenticated actor and rejects forged identity',async()=>{
+ const token='A'.repeat(43);let input;
+ const handlers=createAuthHandlers({origin:'https://suyai.example',production:true,assignStudentTeacher:async x=>{input=x;},listStudentTeacherHistory:async x=>{input=x;return {items:[]};}});
+ const url='https://suyai.example/api/admin/student-teacher',cookie=`__Host-suyai_session=${token}`;
+ const make=body=>new Request(url,{method:'POST',headers:{cookie,origin:'https://suyai.example','content-type':'application/json'},body:JSON.stringify(body)});
+ assert.equal((await handlers.studentTeacher(make({studentId:'student',teacherId:'teacher',actorToken:'forged'}))).status,400);
+ assert.equal((await handlers.studentTeacher(make({studentId:'student',teacherId:'teacher'}))).status,200);
+ assert.deepEqual(input,{studentId:'student',teacherId:'teacher',actorToken:token});
+ assert.equal((await handlers.studentTeacher(new Request(`${url}?studentId=student`,{headers:{cookie}}))).status,200);
+ assert.deepEqual(input,{studentId:'student',actorToken:token});
+});
+
 test('fee tiers require a session and same origin for changes',async()=>{
  const token='A'.repeat(43);let changed=false;
  const handlers=createAuthHandlers({origin:'https://suyai.example',production:true,getFeeTierSchedules:async()=>({history:[]}),scheduleFeeTiers:async()=>{changed=true;return {id:'1'};}});
@@ -78,12 +108,12 @@ test('student creation requires session and passes identity from cookie, not the
   const token = 'A'.repeat(43); let captured;
   const handlers = createAuthHandlers({ origin: 'https://suyai.example', production: true, createStudent: async (input) => { captured = input; return 'student-id'; } });
   const headers = { origin:'https://suyai.example', 'content-type':'application/json', cookie:`__Host-suyai_session=${token}` };
-  const payload = { fullName:'Ana', email:'ana@example.com', phone:'123', initialPassword:'temporal segura', enrolledOn:'2026-11-25', active:true, weekdays:[1], feeStart:'CURRENT', branch:'GODOY_CRUZ' };
+  const payload = { fullName:'Ana', email:'ana@example.com', phone:'123', initialPassword:'temporal segura', enrolledOn:'2026-11-25', active:true, weekdays:[1], feeStart:'CURRENT', branch:'GODOY_CRUZ', teacherId:'11111111-1111-4111-8111-111111111111' };
   const request = (data, overrides = {}) => new Request('https://suyai.example/api', { method:'POST', headers:{ ...headers, ...overrides }, body:JSON.stringify(data) });
   assert.equal((await handlers.createStudent(request(payload, { origin:'https://evil.example' }))).status, 403);
   assert.equal((await handlers.createStudent(request({ ...payload, actorToken:'forged' }))).status, 400);
   const res = await handlers.createStudent(request(payload));
-  assert.equal(res.status, 201); assert.equal(captured.actorToken, token); assert.equal(captured.branch,'GODOY_CRUZ'); assert.equal((await res.text()).includes(payload.initialPassword), false);
+  assert.equal(res.status, 201); assert.equal(captured.actorToken, token); assert.equal(captured.branch,'GODOY_CRUZ'); assert.equal(captured.teacherId,payload.teacherId); assert.equal((await res.text()).includes(payload.initialPassword), false);
 });
 
 test('student status changes use the administrator session and require same-origin requests', async () => {

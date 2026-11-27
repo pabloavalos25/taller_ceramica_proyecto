@@ -15,11 +15,11 @@ test('an administrator creates a student atomically with attendance and fee choi
   const root = new pg.Client({ connectionString: url }); await root.connect(); await root.query(`CREATE SCHEMA "${schema}"`);
   const pool = new pg.Pool({ connectionString: url, options: `-c search_path=${schema}` });
   try {
-    for (const file of ['001_initial.sql','002_student_status_history.sql','006_auth_sessions.sql','010_student_creation.sql','023_student_branch.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
+    for (const file of ['001_initial.sql','002_student_status_history.sql','006_auth_sessions.sql','010_student_creation.sql','023_student_branch.sql','025_admin_profiles.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
     const hash = await hashPassword('contraseña inicial 123');
-    const admin = (await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com',$1,'ADMIN',false) RETURNING id", [hash])).rows[0].id;
+    const admin = (await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com',$1,'ADMIN',false) RETURNING id", [hash])).rows[0].id; await pool.query("INSERT INTO admin_profiles(user_id,display_name,access_level) VALUES ($1,'Principal','PRINCIPAL')",[admin]);
     const actorToken = await createSession(pool, admin);
-    const input = { actorToken, fullName: ' Lucía Martínez ', email: ' LUCIA@example.com ', phone: '123456', initialPassword: 'contraseña temporal 123', enrolledOn: '2026-11-25', active: true, weekdays: [1,3,6], feeStart: 'NEXT', branch:'GODOY_CRUZ' };
+    const input = { actorToken, fullName: ' Lucía Martínez ', email: ' LUCIA@example.com ', phone: '123456', initialPassword: 'contraseña temporal 123', enrolledOn: '2026-11-25', active: true, weekdays: [1,3,6], feeStart: 'NEXT', branch:'GODOY_CRUZ',teacherId:admin };
     const id = await createStudent(pool, input);
     const student = (await pool.query('SELECT u.email,u.password_hash,u.must_change_password,p.full_name,p.active FROM users u JOIN student_profiles p ON p.user_id=u.id WHERE u.id=$1', [id])).rows[0];
     assert.equal(student.email, 'lucia@example.com'); assert.equal(student.full_name, 'Lucía Martínez'); assert.equal(student.must_change_password, true);

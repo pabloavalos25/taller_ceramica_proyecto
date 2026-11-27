@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { loginDestination } from '../src/auth/login-destination.mjs';
 
 export default function LoginForm({ enabled }) {
   const [email, setEmail] = useState('');
@@ -23,7 +24,8 @@ export default function LoginForm({ enabled }) {
       const current = await fetch('/api/auth/session', { cache: 'no-store' });
       if (!current.ok) { setError('No pudimos verificar tu sesión. Intentá nuevamente.'); return; }
       const session = await current.json();
-      if (session.mustChangePassword) { window.location.assign('/cambiar-contrasena'); return; }
+      const destination = loginDestination(session);
+      if (destination) { window.location.assign(destination); return; }
       setRole(session.role); setSignedIn(true);
     } catch { setError('No pudimos ingresar. Revisá tu conexión.'); }
     finally { setBusy(false); }

@@ -16,7 +16,7 @@ test('login normalizes emails, issues sessions, and rate-limits failed attempts'
   await root.query(`CREATE SCHEMA "${schema}"`);
   const pool = new pg.Pool({ connectionString: url, options: `-c search_path=${schema}` });
   try {
-    for (const file of ['001_initial.sql','006_auth_sessions.sql','007_login_throttle.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
+    for (const file of ['001_initial.sql','006_auth_sessions.sql','007_login_throttle.sql','025_admin_profiles.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
     const hash = await hashPassword('contraseña segura 123');
     const id = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('ana@example.com',$1,'USER') RETURNING id", [hash])).rows[0].id;
     const globalKey = createHash('sha256').update('source:web-global').digest('hex');

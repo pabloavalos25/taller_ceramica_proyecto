@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {validateFeeTiers} from './fee-tiers.mjs';
 
 function tokenHash(token){if(typeof token!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(token))throw new Error('Operación no autorizada');return createHash('sha256').update(token).digest('hex');}
-async function admin(client,hash){const actor=await client.query("SELECT u.id FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.role='ADMIN' AND NOT u.must_change_password FOR SHARE OF u,s",[hash]);if(!actor.rowCount)throw new Error('Operación no autorizada');return actor.rows[0].id;}
+async function admin(client,hash,write=false){const actor=await client.query("SELECT u.id FROM auth_sessions s JOIN users u ON u.id=s.user_id JOIN admin_profiles p ON p.user_id=u.id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.role='ADMIN' AND NOT u.must_change_password AND p.active AND ($2::boolean=false OR p.access_level='PRINCIPAL') FOR SHARE OF u,s,p",[hash,write]);if(!actor.rowCount)throw new Error('Operación no autorizada');return actor.rows[0].id;}
 export async function getFeeTierSchedules(pool,{actorToken}={}){
   const hash=tokenHash(actorToken),client=await pool.connect();try{
     await client.query('BEGIN');await admin(client,hash);
@@ -12,7 +12,7 @@ export async function getFeeTierSchedules(pool,{actorToken}={}){
 }
 export async function scheduleFeeTiers(pool,{actorToken,tiers}={}){
   const hash=tokenHash(actorToken),rules=validateFeeTiers(tiers),client=await pool.connect();try{
-    await client.query('BEGIN');const actorId=await admin(client,hash);
+    await client.query('BEGIN');const actorId=await admin(client,hash,true);
     if(!(await client.query('SELECT id FROM fee_price_lock WHERE id=true FOR UPDATE')).rowCount)throw new Error('Falta bloqueo de configuración de cuotas');
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended('suyai-fee-tier-schedule',0))");
     const inserted=await client.query("INSERT INTO fee_tier_schedules(effective_period,actor_id) VALUES ((date_trunc('month',statement_timestamp() AT TIME ZONE 'America/Argentina/Buenos_Aires') + interval '1 month')::date,$1) RETURNING id",[actorId]);

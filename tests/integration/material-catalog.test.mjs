@@ -12,8 +12,8 @@ test('catalog changes are authorized, versioned, auditable and safe to retry',as
   const schema=`suyai_test_${randomUUID().replaceAll('-','')}`;const root=new pg.Client({connectionString:url});await root.connect();await root.query(`CREATE SCHEMA "${schema}"`);
   const pool=new pg.Pool({connectionString:url,options:`-c search_path=${schema}`});
   try{
-    for(const file of ['001_initial.sql','006_auth_sessions.sql','018_material_catalog.sql'])await pool.query(await readFile(new URL(`../../db/migrations/${file}`,import.meta.url),'utf8'));
-    const admin=(await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com','hash','ADMIN',false) RETURNING id")).rows[0].id;
+    for(const file of ['001_initial.sql','006_auth_sessions.sql','018_material_catalog.sql','025_admin_profiles.sql'])await pool.query(await readFile(new URL(`../../db/migrations/${file}`,import.meta.url),'utf8'));
+    const admin=(await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@example.com','hash','ADMIN',false) RETURNING id")).rows[0].id; await pool.query("INSERT INTO admin_profiles(user_id,display_name,access_level) VALUES ($1,'Principal','PRINCIPAL')",[admin]);
     const user=(await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('ana@example.com','hash','USER') RETURNING id")).rows[0].id;
     const token=await createSession(pool,admin),other=await createSession(pool,user);
     const material={name:'Pasta cerámica',category:'Arcillas',description:'Blanca',unit:'KG',customUnit:null,priceCents:400000n,active:true};

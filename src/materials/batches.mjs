@@ -12,7 +12,7 @@ export async function saveMaterialBatch(pool,{actorToken,idempotencyKey,batch},t
   })}))};
   const client=transactionClient??await pool.connect();try{
     if(!transactionClient)await client.query('BEGIN');
-    const auth=await client.query("SELECT u.id FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.role='ADMIN' AND NOT u.must_change_password FOR SHARE OF u,s",[createHash('sha256').update(actorToken).digest('hex')]);
+    const auth=await client.query("SELECT u.id,p.access_level FROM auth_sessions s JOIN users u ON u.id=s.user_id JOIN admin_profiles p ON p.user_id=u.id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.role='ADMIN' AND NOT u.must_change_password AND p.active FOR SHARE OF u,s,p",[createHash('sha256').update(actorToken).digest('hex')]);
     if(!auth.rowCount)throw new MaterialBatchError('FORBIDDEN','Operación no autorizada');
     const actor=auth.rows[0].id;const fingerprint=createHash('sha256').update(JSON.stringify({actor,data})).digest('hex');
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended('suyai-material-batch:' || $1::text,0))",[idempotencyKey.toLowerCase()]);
@@ -22,10 +22,10 @@ export async function saveMaterialBatch(pool,{actorToken,idempotencyKey,batch},t
     if(profiles.rowCount!==ids.length)throw new MaterialBatchError('STUDENT','Alumna inexistente');const active=new Map(profiles.rows.map(x=>[x.user_id,x.active]));
     for(const b of data.students)if(!active.get(b.studentId)&&!b.confirmInactive)throw new MaterialBatchError('INACTIVE','Confirmá el cargo para la alumna inactiva');
     const materialIds=[...new Set(data.students.flatMap(b=>b.items.map(i=>i.materialId)))].sort();
-    const materials=await client.query('SELECT id,name,unit,custom_unit,active FROM materials WHERE id=ANY($1::uuid[]) ORDER BY id FOR SHARE',[materialIds]);
+    const materials=await client.query('SELECT id,name,unit,custom_unit,active,price_cents::text FROM materials WHERE id=ANY($1::uuid[]) ORDER BY id FOR SHARE',[materialIds]);
     if(materials.rowCount!==materialIds.length||materials.rows.some(m=>!m.active))throw new MaterialBatchError('MATERIAL','Algún material ya no está disponible');
     const lookup=new Map(materials.rows.map(m=>[m.id,m]));
-    for(const b of data.students)for(const i of b.items)if(lookup.get(i.materialId).name!==i.name)throw new MaterialBatchError('MATERIAL','El material cambió; volvé a seleccionarlo');
+    for(const b of data.students)for(const i of b.items){if(lookup.get(i.materialId).name!==i.name)throw new MaterialBatchError('MATERIAL','El material cambió; volvé a seleccionarlo');if(auth.rows[0].access_level!=='PRINCIPAL'&&lookup.get(i.materialId).price_cents!==i.unitPriceCents)throw new MaterialBatchError('PRICE','El precio cambió; volvé a seleccionar el material');}
     const id=(await client.query('INSERT INTO material_batches(consumption_date,billing_period,actor_id,idempotency_key,request_fingerprint) VALUES ($1,$2,$3,$4,$5) RETURNING id',[data.date,`${data.period}-01`,actor,idempotencyKey,fingerprint])).rows[0].id;
     for(const b of data.students){await client.query('INSERT INTO material_batch_students(batch_id,student_id,inactive_confirmed) VALUES ($1,$2,$3)',[id,b.studentId,!active.get(b.studentId)&&b.confirmInactive]);for(const i of b.items){const m=lookup.get(i.materialId);const charge=(await client.query("INSERT INTO charges(student_id,category,amount_cents,description) VALUES ($1,'MATERIAL',$2,$3) RETURNING id",[b.studentId,i.subtotalCents,i.name])).rows[0].id;await client.query('INSERT INTO material_batch_items(batch_id,student_id,material_id,charge_id,name,unit,quantity,unit_price_cents,subtotal_cents,zero_price_reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',[id,b.studentId,i.materialId,charge,i.name,m.unit==='CUSTOM'?m.custom_unit:m.unit,i.quantity,i.unitPriceCents,i.subtotalCents,i.zeroPriceReason]);}}
     if(!transactionClient)await client.query('COMMIT');return {id,replayed:false};

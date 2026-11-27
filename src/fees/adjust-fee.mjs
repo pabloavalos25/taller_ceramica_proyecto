@@ -24,7 +24,7 @@ export async function adjustFee(pool, { actorToken, feeId, amountCents, reason, 
   const client=await pool.connect();
   try {
     await client.query('BEGIN');
-    const actor=await client.query("SELECT u.id FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.role='ADMIN' AND NOT u.must_change_password FOR SHARE OF u,s",[tokenHash]);
+    const actor=await client.query("SELECT u.id FROM auth_sessions s JOIN users u ON u.id=s.user_id JOIN admin_profiles p ON p.user_id=u.id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.role='ADMIN' AND NOT u.must_change_password AND p.active AND p.access_level='PRINCIPAL' FOR SHARE OF u,s,p",[tokenHash]);
     if (!actor.rowCount) throw new FeeAdjustmentError('FORBIDDEN','Operación no autorizada');
     const actorId=actor.rows[0].id;
     const fingerprint=createHash('sha256').update(JSON.stringify({actorId,feeId:feeId.toLowerCase(),amountCents:amountCents.toString(),reason:reason.trim()})).digest('hex');

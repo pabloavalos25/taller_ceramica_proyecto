@@ -14,5 +14,5 @@ export default async function FeePricesPage() {
   const session = await response.json();
   if (session.mustChangePassword) redirect('/cambiar-contrasena');
   if (session.role !== 'ADMIN') redirect('/');
-  return <FeePrices />;
+  return <FeePrices canEdit={session.accessLevel==='PRINCIPAL'} />;
 }

@@ -5,7 +5,7 @@ function tokenHash(token) {
   return createHash('sha256').update(token).digest('hex');
 }
 async function actor(client, hash, lock) {
-  const result = await client.query(`SELECT u.id FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.role='ADMIN' AND NOT u.must_change_password ${lock ? 'FOR SHARE OF u,s' : ''}`, [hash]);
+  const result = await client.query(`SELECT u.id FROM auth_sessions s JOIN users u ON u.id=s.user_id JOIN admin_profiles p ON p.user_id=u.id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.role='ADMIN' AND NOT u.must_change_password AND p.active ${lock ? "AND p.access_level='PRINCIPAL' FOR SHARE OF u,s,p" : ''}`, [hash]);
   if (!result.rowCount) throw new DueDayError('FORBIDDEN','Operación no autorizada');
   return result.rows[0].id;
 }

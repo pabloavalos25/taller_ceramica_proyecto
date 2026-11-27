@@ -14,5 +14,6 @@ export default async function AdjustmentPage() {
   const session=await response.json();
   if (session.mustChangePassword) redirect('/cambiar-contrasena');
   if (session.role!=='ADMIN') redirect('/');
+  if (session.accessLevel!=='PRINCIPAL') redirect('/admin/cuotas');
   return <Adjustment />;
 }

@@ -24,6 +24,8 @@ import { getAdminSummary } from '../students/admin-summary.mjs';
 import { correctMaterialItem } from '../materials/corrections.mjs';
 import { listDrafts,getDraft,saveDraft,confirmDraft } from '../drafts/store.mjs';
 import { createAuthHandlers } from './http-handlers.mjs';
+import { createTeacher, listTeachers, deactivateTeacher } from './admin-management.mjs';
+import { assignStudentTeacher, listStudentTeacherHistory } from '../students/teacher-assignment.mjs';
 
 let pool;
 const ensureFeesForSession=createTierGenerationGate({loadSession:(token)=>getSession(pool,token),run:()=>ensureTierGeneration(pool)});
@@ -70,6 +72,11 @@ export function webAuthHandlers() {
     getDraft: (input) => getDraft(pool,input),
     saveDraft: (input) => saveDraft(pool,input),
     confirmDraft: (input) => confirmDraft(pool,input),
+    createTeacher: (input) => createTeacher(pool,input),
+    listTeachers: (input) => listTeachers(pool,input),
+    deactivateTeacher: (input) => deactivateTeacher(pool,input),
+    assignStudentTeacher: (input) => assignStudentTeacher(pool,input),
+    listStudentTeacherHistory: (input) => listStudentTeacherHistory(pool,input),
   });
 }
 export function unavailable() {

@@ -16,7 +16,7 @@ test('HTTP login creates a real session and logout revokes it', async () => {
   const root = new pg.Client({ connectionString: url }); await root.connect(); await root.query(`CREATE SCHEMA "${schema}"`);
   const pool = new pg.Pool({ connectionString: url, options: `-c search_path=${schema}` });
   try {
-    for (const file of ['001_initial.sql','006_auth_sessions.sql','007_login_throttle.sql','008_password_change_throttle.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
+    for (const file of ['001_initial.sql','006_auth_sessions.sql','007_login_throttle.sql','008_password_change_throttle.sql','025_admin_profiles.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
     const hash = await hashPassword('contraseña segura 123');
     await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('ana@example.com',$1,'USER')", [hash]);
     const handlers = createAuthHandlers({ origin: 'https://suyai.example', production: true, authenticate: (data) => authenticate(pool, data), getSession: (token) => getSession(pool, token), revokeSession: (token) => revokeSession(pool, token), changePassword: (token, current, next) => changePassword(pool, token, current, next) });

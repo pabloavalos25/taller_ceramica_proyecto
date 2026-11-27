@@ -19,6 +19,7 @@
 
 .shell{background:#f7f6f3 url('/fondo-marmol.png') center/cover}.shell .welcome{background:rgba(39,52,34,.72)}.shell .form-side{background:rgba(249,248,245,.9)}
 .mobile-nav-toggle{display:none}
+.shell .access-back{text-decoration:none}
 @media(max-width:700px){
   .shell{display:flex;flex-direction:column;background:#f9f8f5}
   .shell .welcome{background:linear-gradient(rgba(39,52,34,.72),rgba(39,52,34,.72)),url('/fondo-marmol.png') center/cover}

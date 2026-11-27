@@ -16,18 +16,24 @@ export async function authenticate(pool, { email, password, source }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    for (const key of keys) await client.query('INSERT INTO login_throttle(bucket) VALUES ($1) ON CONFLICT DO NOTHING', [key]);
+    // Hold a row lock even when the bucket already exists, so maintenance
+    // cannot remove it between creation and the following locked read.
+    for (const key of keys) await client.query('INSERT INTO login_throttle(bucket) VALUES ($1) ON CONFLICT (bucket) DO UPDATE SET bucket = EXCLUDED.bucket', [key]);
     const result = await client.query("SELECT bucket, failures, window_started_at <= now() - interval '15 minutes' AS expired FROM login_throttle WHERE bucket = ANY($1::text[]) ORDER BY bucket FOR UPDATE", [keys]);
     for (const row of result.rows) if (row.expired) { await client.query('UPDATE login_throttle SET failures = 0, window_started_at = now() WHERE bucket = $1', [row.bucket]); row.failures = 0; }
     const counts = new Map(result.rows.map((row) => [row.bucket, row.failures]));
     if (counts.get(accountKey) >= 5 || counts.get(sourceKey) >= 20) { await client.query('COMMIT'); return null; }
-    const users = await client.query('SELECT id, password_hash FROM users WHERE email = $1 FOR SHARE', [normalized]);
+    const users = await client.query('SELECT id, password_hash, role FROM users WHERE email = $1 FOR SHARE', [normalized]);
     const user = users.rows[0];
     const valid = await verifyPassword(password, user?.password_hash ?? await dummyHash);
     if (!user || !valid) {
       await client.query('UPDATE login_throttle SET failures = failures + 1 WHERE bucket = ANY($1::text[])', [keys]);
       await client.query('COMMIT');
       return null;
+    }
+    if (user.role === 'ADMIN') {
+      const profile = await client.query('SELECT active FROM admin_profiles WHERE user_id=$1 FOR SHARE', [user.id]);
+      if (!profile.rowCount || !profile.rows[0].active) { await client.query('COMMIT'); return null; }
     }
     await client.query('UPDATE login_throttle SET failures = 0, window_started_at = now() WHERE bucket = $1', [accountKey]);
     const token = await createSession(client, user.id);

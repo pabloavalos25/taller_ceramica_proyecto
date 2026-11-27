@@ -25,11 +25,43 @@ function getCookie(request, name) {
   return values.length === 1 && tokenPattern.test(values[0]) ? values[0] : null;
 }
 
-export function createAuthHandlers({ origin, production, authenticate, revokeSession, getSession, changePassword, resetStudentPassword, createStudent, changeStudentStatus, listStudents, setFeePrice, getFeePrices, getFeeTierSchedules, scheduleFeeTiers, setDueDay, getDueDays, adjustFee, listAdjustableFees, saveKilnBatch, listKilnBatches, getKilnBatch, correctKilnItem, saveMaterial, listMaterials, saveMaterialBatch, listMaterialBatches, getMaterialBatch, listPayableCharges, recordAuthorizedPayment, listPayments, getPayment, voidAuthorizedPayment, getStudentPortal, getAdminSummary, correctMaterialItem, listDrafts, getDraft, saveDraft, confirmDraft }) {
+export function createAuthHandlers({ origin, production, authenticate, revokeSession, getSession, changePassword, resetStudentPassword, createStudent, changeStudentStatus, listStudents, setFeePrice, getFeePrices, getFeeTierSchedules, scheduleFeeTiers, setDueDay, getDueDays, adjustFee, listAdjustableFees, saveKilnBatch, listKilnBatches, getKilnBatch, correctKilnItem, saveMaterial, listMaterials, saveMaterialBatch, listMaterialBatches, getMaterialBatch, listPayableCharges, recordAuthorizedPayment, listPayments, getPayment, voidAuthorizedPayment, getStudentPortal, getAdminSummary, correctMaterialItem, listDrafts, getDraft, saveDraft, confirmDraft, createTeacher, listTeachers, deactivateTeacher, assignStudentTeacher, listStudentTeacherHistory }) {
   const name = production ? '__Host-suyai_session' : 'suyai_session';
   const cookie = (value, maxAge) => `${name}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${production ? '; Secure' : ''}`;
   const allowed = (request) => checkMutationOrigin(request, origin, production);
   return {
+    async studentTeacher(request) {
+      if(request.method==='GET'){
+        const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);
+        const params=new URL(request.url).searchParams;
+        if([...params.keys()].some(k=>k!=='studentId'||params.getAll(k).length!==1)||!params.get('studentId'))return json({error:'Datos inválidos'},400);
+        try{return json(await listStudentTeacherHistory({actorToken:token,studentId:params.get('studentId')}));}
+        catch(error){if(/no autorizada/i.test(error?.message??''))return json({error:'Operación no autorizada'},403);if(error instanceof RangeError)return json({error:'Datos inválidos'},400);return json({error:'Servicio no disponible'},503);}
+      }
+      if(!allowed(request))return json({error:'Solicitud no permitida'},403);
+      const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);
+      let body;try{body=await readBody(request);}catch{return json({error:'Datos inválidos'},400);}
+      if(!body||Object.keys(body).some(k=>!['studentId','teacherId'].includes(k))||typeof body.studentId!=='string'||typeof body.teacherId!=='string')return json({error:'Datos inválidos'},400);
+      try{await assignStudentTeacher({actorToken:token,studentId:body.studentId,teacherId:body.teacherId});return json({ok:true});}
+      catch(error){if(/no autorizada/i.test(error?.message??''))return json({error:'Operación no autorizada'},403);if(error instanceof RangeError)return json({error:'Datos inválidos'},400);return json({error:'Servicio no disponible'},503);}
+    },
+    async teachers(request) {
+      const token=getCookie(request,name); if(!token)return json({error:'No autenticado'},401);
+      try {
+        if(request.method==='GET') return json(await listTeachers({actorToken:token}));
+        if(!allowed(request))return json({error:'Solicitud no permitida'},403);
+        let body;try{body=await readBody(request);}catch{return json({error:'Datos inválidos'},400);}
+        if(request.method==='POST'){
+          if(!body||Object.keys(body).some(k=>!['displayName','email','temporaryPassword'].includes(k))||typeof body.displayName!=='string'||typeof body.email!=='string'||typeof body.temporaryPassword!=='string')return json({error:'Datos inválidos'},400);
+          const id=await createTeacher({actorToken:token,...body});return json({id},201);
+        }
+        if(request.method==='DELETE'){
+          if(!body||Object.keys(body).some(k=>k!=='teacherId')||typeof body.teacherId!=='string')return json({error:'Datos inválidos'},400);
+          await deactivateTeacher({actorToken:token,teacherId:body.teacherId});return json({ok:true});
+        }
+        return json({error:'Solicitud no permitida'},403);
+      } catch(error){if(/no autorizada/i.test(error?.message??''))return json({error:'Operación no autorizada'},403);if(error instanceof RangeError||error?.code==='23505')return json({error:'Revisá los datos ingresados.'},400);return json({error:'Servicio no disponible'},503);}
+    },
     async feeTiers(request) {
       const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);
       try {
@@ -103,10 +135,10 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
       if (!token) return json({ error: 'No autenticado' }, 401);
       let body;
       try { body = await readBody(request); } catch { return json({ error: 'Datos inválidos' }, 400); }
-      const keys = ['fullName', 'email', 'phone', 'initialPassword', 'enrolledOn', 'active', 'weekdays', 'feeStart', 'branch'];
+      const keys = ['fullName', 'email', 'phone', 'initialPassword', 'enrolledOn', 'active', 'weekdays', 'feeStart', 'branch','teacherId'];
       if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((key) => !keys.includes(key)) || keys.some((key) => !Object.hasOwn(body, key))) return json({ error: 'Datos inválidos' }, 400);
       try {
-        const id = await createStudent({ actorToken: token, fullName: body.fullName, email: body.email, phone: body.phone, initialPassword: body.initialPassword, enrolledOn: body.enrolledOn, active: body.active, weekdays: body.weekdays, feeStart: body.feeStart, branch:body.branch });
+        const id = await createStudent({ actorToken: token, fullName: body.fullName, email: body.email, phone: body.phone, initialPassword: body.initialPassword, enrolledOn: body.enrolledOn, active: body.active, weekdays: body.weekdays, feeStart: body.feeStart, branch:body.branch,teacherId:body.teacherId });
         return json({ id }, 201);
       } catch (error) {
         if (error?.code === 'FORBIDDEN') return json({ error: 'Operación no autorizada' }, 403);
@@ -137,11 +169,11 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
       const token = getCookie(request, name);
       if (!token) return json({ error: 'No autenticado' }, 401);
       const params = new URL(request.url).searchParams;
-      const keys = ['search','status','weekday','economic','branch','limit','offset'];
+      const keys = ['search','status','weekday','economic','branch','teacherId','limit','offset'];
       if ([...params.keys()].some((key) => !keys.includes(key) || params.getAll(key).length !== 1)) return json({ error: 'Filtros inválidos' }, 400);
       const number = (key, fallback) => { const value = params.get(key); if (value === null) return fallback; if (!/^\d{1,6}$/.test(value)) throw new RangeError('Filtro inválido'); return Number(value); };
       try {
-        const data = await listStudents({ actorToken:token, search:params.get('search') ?? '', status:params.get('status') ?? 'ALL', weekday:number('weekday', null), economic:params.get('economic') ?? 'ALL', branch:params.get('branch') ?? 'ALL', limit:number('limit', 50), offset:number('offset', 0) });
+        const data = await listStudents({ actorToken:token, search:params.get('search') ?? '', status:params.get('status') ?? 'ALL', weekday:number('weekday', null), economic:params.get('economic') ?? 'ALL', branch:params.get('branch') ?? 'ALL', teacherId:params.get('teacherId'),limit:number('limit', 50), offset:number('offset', 0) });
         return json(data);
       } catch (error) {
         if (error?.code === 'FORBIDDEN') return json({ error: 'Operación no autorizada' }, 403);
@@ -237,7 +269,7 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
       if(!allowed(request))return json({error:'Solicitud no permitida'},403);const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);let body;try{body=await readBody(request,1100000);}catch{return json({error:'Datos inválidos o demasiado extensos'},400);}
       const common=['action','draftId','expectedVersion','idempotencyKey'],fields=body?.action==='SAVE'?[...common,'type','data']:common;if(!body||typeof body!=='object'||Array.isArray(body)||!['SAVE','CONFIRM'].includes(body.action)||typeof body.draftId!=='string'||typeof body.idempotencyKey!=='string'||!Number.isInteger(body.expectedVersion)||Object.keys(body).some(k=>!fields.includes(k)))return json({error:'Datos inválidos'},400);
       try{const input={actorToken:token,draftId:body.draftId,expectedVersion:body.expectedVersion,idempotencyKey:body.idempotencyKey};return json(body.action==='SAVE'?await saveDraft({...input,type:body.type,data:body.data}):await confirmDraft(input));}
-      catch(e){if(e?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(['VERSION','CONFIRMED','IDEMPOTENCY','INACTIVE','MATERIAL'].includes(e?.code))return json({error:e.message,code:e.code},409);if(e?.code==='DRAFT'||e?.code==='STUDENT'||e instanceof RangeError||e instanceof TypeError)return json({error:'Revisá los datos del borrador.'},400);return json({error:'Servicio no disponible'},503);}
+      catch(e){if(e?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(['VERSION','CONFIRMED','IDEMPOTENCY','INACTIVE','MATERIAL','PRICE'].includes(e?.code))return json({error:e.message,code:e.code},409);if(e?.code==='DRAFT'||e?.code==='STUDENT'||e instanceof RangeError||e instanceof TypeError)return json({error:'Revisá los datos del borrador.'},400);return json({error:'Servicio no disponible'},503);}
     },
     async correctMaterialItem(request){
       if(!allowed(request))return json({error:'Solicitud no permitida'},403);const token=getCookie(request,name);if(!token)return json({error:'No autenticado'},401);let body;try{body=await readBody(request);}catch{return json({error:'Datos inválidos'},400);}
@@ -297,7 +329,7 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
       let body;try{body=await readBody(request,1048576);}catch{return json({error:'Datos inválidos o demasiado extensos'},400);}
       if(!body||typeof body!=='object'||Array.isArray(body)||typeof body.idempotencyKey!=='string'||!body.batch||Object.keys(body).some(key=>!['idempotencyKey','batch'].includes(key)))return json({error:'Datos inválidos'},400);
       try{return json(await saveMaterialBatch({actorToken:token,idempotencyKey:body.idempotencyKey,batch:body.batch}));}
-      catch(error){if(error?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(['IDEMPOTENCY','INACTIVE','MATERIAL'].includes(error?.code))return json({error:error.message},409);if(error?.code==='STUDENT'||error instanceof RangeError)return json({error:'Revisá los datos de la carga.'},400);return json({error:'Servicio no disponible'},503);}
+      catch(error){if(error?.code==='FORBIDDEN')return json({error:'Operación no autorizada'},403);if(['IDEMPOTENCY','INACTIVE','MATERIAL','PRICE'].includes(error?.code))return json({error:error.message},409);if(error?.code==='STUDENT'||error instanceof RangeError)return json({error:'Revisá los datos de la carga.'},400);return json({error:'Servicio no disponible'},503);}
     },
     async saveKilnBatch(request) {
       if(!allowed(request)) return json({error:'Solicitud no permitida'},403);
@@ -337,7 +369,7 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
       try {
         const current = await getSession(token);
         if (!current) return json({ error: 'No autenticado' }, 401);
-        return json({ role: current.role, mustChangePassword: current.mustChangePassword });
+        return json({ role: current.role, mustChangePassword: current.mustChangePassword, ...(current.role === 'ADMIN' ? { displayName: current.displayName, accessLevel: current.accessLevel } : {}) });
       } catch { return json({ error: 'Servicio no disponible' }, 503); }
     },
   };

@@ -14,10 +14,10 @@ test('lists students with combined filters and effective payment balances', asyn
   const root = new pg.Client({ connectionString: url }); await root.connect(); await root.query(`CREATE SCHEMA "${schema}"`);
   const pool = new pg.Pool({ connectionString: url, options: `-c search_path=${schema}` });
   try {
-    for (const file of ['001_initial.sql','002_student_status_history.sql','003_financial_foundation.sql','004_payment_idempotency.sql','005_payment_void.sql','006_auth_sessions.sql','023_student_branch.sql','015_fee_adjustments.sql','024_fee_tier_schedules.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
+    for (const file of ['001_initial.sql','002_student_status_history.sql','003_financial_foundation.sql','004_payment_idempotency.sql','005_payment_void.sql','006_auth_sessions.sql','023_student_branch.sql','015_fee_adjustments.sql','024_fee_tier_schedules.sql','025_admin_profiles.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
     const user = async (email, role, change = false) => (await pool.query('INSERT INTO users(email,password_hash,role,must_change_password) VALUES ($1,$2,$3,$4) RETURNING id',[email,'hash',role,change])).rows[0].id;
     await pool.query('DELETE FROM fee_tier_rules');await pool.query('DELETE FROM fee_tier_schedules');
-  const admin = await user('admin@example.com','ADMIN');
+  const admin = await user('admin@example.com','ADMIN'); await pool.query("INSERT INTO admin_profiles(user_id,display_name,access_level) VALUES ($1,'Principal','PRINCIPAL')",[admin]);
     const ana = await user('ana@example.com','USER'); const bea = await user('bea@example.com','USER'); const cris = await user('cris@example.com','USER');
     for (const [id,name,active] of [[ana,'Ana María',true],[bea,'Bea López',true],[cris,'Cris Díaz',false]]) await pool.query("INSERT INTO student_profiles(user_id,full_name,enrolled_on,active) VALUES ($1,$2,'2026-11-25',$3)",[id,name,active]);
     await pool.query("UPDATE student_profiles SET branch=CASE WHEN user_id=$1 THEN 'GODOY_CRUZ' ELSE 'LUJAN_DE_CUYO' END WHERE user_id IN ($1,$2)",[ana,bea]);

@@ -14,7 +14,7 @@ test('changing password verifies the current one and revokes all sessions', asyn
   const root = new pg.Client({ connectionString: url }); await root.connect(); await root.query(`CREATE SCHEMA "${schema}"`);
   const pool = new pg.Pool({ connectionString: url, options: `-c search_path=${schema}` });
   try {
-    for (const file of ['001_initial.sql','006_auth_sessions.sql','008_password_change_throttle.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
+    for (const file of ['001_initial.sql','006_auth_sessions.sql','008_password_change_throttle.sql','025_admin_profiles.sql']) await pool.query(await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), 'utf8'));
     const hash = await hashPassword('contraseña inicial 123');
     const id = (await pool.query("INSERT INTO users(email,password_hash,role) VALUES ('ana@example.com',$1,'USER') RETURNING id", [hash])).rows[0].id;
     const a = await createSession(pool, id); const b = await createSession(pool, id);

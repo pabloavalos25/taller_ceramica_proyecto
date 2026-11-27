@@ -5,7 +5,7 @@ export async function correctMaterialItem(pool,{actorToken,itemId,action,amountC
  if(![itemId,idempotencyKey].every(id=>typeof id==='string'&&uuid.test(id))||!['ADJUST','VOID'].includes(action)||typeof amountCents!=='bigint'||amountCents<0n||amountCents>9223372036854775807n||(action==='VOID'&&amountCents!==0n)||typeof reason!=='string'||!reason.trim()||reason.trim().length>500)throw new RangeError('Datos inválidos');
  const client=await pool.connect();try{
   await client.query('BEGIN');
-  const auth=await client.query("SELECT u.id FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.role='ADMIN' AND NOT u.must_change_password FOR SHARE OF u,s",[createHash('sha256').update(actorToken).digest('hex')]);
+  const auth=await client.query("SELECT u.id FROM auth_sessions s JOIN users u ON u.id=s.user_id JOIN admin_profiles p ON p.user_id=u.id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.role='ADMIN' AND NOT u.must_change_password AND p.active AND p.access_level='PRINCIPAL' FOR SHARE OF u,s,p",[createHash('sha256').update(actorToken).digest('hex')]);
   if(!auth.rowCount)throw new MaterialBatchError('FORBIDDEN','Operación no autorizada');const actorId=auth.rows[0].id;
   const fingerprint=createHash('sha256').update(JSON.stringify({actorId,itemId:itemId.toLowerCase(),action,amount:amountCents.toString(),reason:reason.trim()})).digest('hex');
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended('suyai-material-correction:' || $1::text,0))",[idempotencyKey.toLowerCase()]);

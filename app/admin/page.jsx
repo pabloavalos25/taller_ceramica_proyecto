@@ -15,5 +15,5 @@ export default async function AdminPage() {
   const session = await response.json();
   if (session.mustChangePassword) redirect('/cambiar-contrasena');
   if (session.role !== 'ADMIN') redirect('/');
-  return <Dashboard/>;
+  return <Dashboard displayName={session.displayName} accessLevel={session.accessLevel}/>;
 }

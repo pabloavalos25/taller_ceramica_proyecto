@@ -20,10 +20,10 @@ test('el recorrido web genera y cobra la cuota actual completa con el tramo vige
   await pool.query('DELETE FROM fee_tier_rules');await pool.query('DELETE FROM fee_tier_schedules');
   const schedule=(await pool.query("INSERT INTO fee_tier_schedules(effective_period) VALUES (date_trunc('month',now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date) RETURNING id")).rows[0].id;
   await pool.query('INSERT INTO fee_tier_rules(schedule_id,start_day,amount_cents) VALUES ($1,1,4500000),($1,2,5000000)',[schedule]);
-  const admin=(await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@web.invalid','hash','ADMIN',false) RETURNING id")).rows[0].id;
+  const admin=(await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@web.invalid','hash','ADMIN',false) RETURNING id")).rows[0].id; await pool.query("INSERT INTO admin_profiles(user_id,display_name,access_level) VALUES ($1,'Principal','PRINCIPAL')",[admin]);
   const adminToken=await createSession(pool,admin);
   const today=(await pool.query("SELECT to_char(now() AT TIME ZONE 'America/Argentina/Buenos_Aires','YYYY-MM-DD') AS day")).rows[0].day;
-  const student=await createStudent(pool,{actorToken:adminToken,fullName:'Alumna de prueba',email:'student@web.invalid',phone:'123456',initialPassword:'ClaveTemporal2026!',enrolledOn:today,active:true,weekdays:[1],feeStart:'CURRENT',branch:'GODOY_CRUZ'});
+  const student=await createStudent(pool,{actorToken:adminToken,fullName:'Alumna de prueba',email:'student@web.invalid',phone:'123456',initialPassword:'ClaveTemporal2026!',enrolledOn:today,active:true,weekdays:[1],feeStart:'CURRENT',branch:'GODOY_CRUZ',teacherId:admin});
   await pool.query('UPDATE users SET must_change_password=false WHERE id=$1',[student]);const studentToken=await createSession(pool,student);
   process.env.DATABASE_URL=isolated.toString();process.env.APP_ORIGIN='http://localhost:3111';process.env.AUTH_WEB_ENABLED='true';process.env.NODE_ENV='test';
   const handlers=webAuthHandlers(),adminCookie=`suyai_session=${adminToken}`,studentCookie=`suyai_session=${studentToken}`;

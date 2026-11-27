@@ -10,10 +10,10 @@ export async function createSession(db, userId) {
 
 export async function getSession(db, token) {
   if (!validToken(token)) return null;
-  const result = await db.query('SELECT u.id, u.role, u.must_change_password FROM auth_sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now()', [tokenHash(token)]);
+  const result = await db.query("SELECT u.id, u.role, u.must_change_password, p.display_name, p.access_level FROM auth_sessions s JOIN users u ON u.id = s.user_id LEFT JOIN admin_profiles p ON p.user_id=u.id WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND (u.role='USER' OR p.active)", [tokenHash(token)]);
   if (!result.rowCount) return null;
   const user = result.rows[0];
-  return { userId: user.id, role: user.role, mustChangePassword: user.must_change_password };
+  return { userId: user.id, role: user.role, mustChangePassword: user.must_change_password, ...(user.role === 'ADMIN' ? { displayName:user.display_name, accessLevel:user.access_level } : {}) };
 }
 
 export async function revokeSession(db, token) {

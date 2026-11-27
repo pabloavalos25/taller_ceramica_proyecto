@@ -6,11 +6,11 @@ function normalize(m){
   if(!m||!nonempty(m.name,200)||!nonempty(m.category,120)||!(m.description===null||typeof m.description==='string'&&m.description.length<=2000)||!['UNIT','G','KG','ML','L','CUSTOM'].includes(m.unit)||(m.unit==='CUSTOM'?!nonempty(m.customUnit,80):m.customUnit!==null)||typeof m.priceCents!=='bigint'||m.priceCents<0n||m.priceCents>9223372036854775807n||typeof m.active!=='boolean')throw new RangeError('Datos del material inválidos');
   return {name:m.name.trim(),category:m.category.trim(),description:m.description?.trim()||null,unit:m.unit,customUnit:m.unit==='CUSTOM'?m.customUnit.trim():null,priceCents:m.priceCents.toString(),active:m.active};
 }
-async function withActor(pool,token,fn){
+async function withActor(pool,token,fn,principalOnly=false){
   if(typeof token!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(token))throw new MaterialError('FORBIDDEN','Operación no autorizada');
   const client=await pool.connect();try{
     await client.query('BEGIN');
-    const actor=await client.query("SELECT u.id FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.role='ADMIN' AND NOT u.must_change_password FOR SHARE OF u,s",[createHash('sha256').update(token).digest('hex')]);
+    const actor=await client.query("SELECT u.id FROM auth_sessions s JOIN users u ON u.id=s.user_id JOIN admin_profiles p ON p.user_id=u.id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.role='ADMIN' AND NOT u.must_change_password AND p.active AND ($2::boolean=false OR p.access_level='PRINCIPAL') FOR SHARE OF u,s,p",[createHash('sha256').update(token).digest('hex'),principalOnly]);
     if(!actor.rowCount)throw new MaterialError('FORBIDDEN','Operación no autorizada');
     const result=await fn(client,actor.rows[0].id);await client.query('COMMIT');return result;
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
@@ -35,7 +35,7 @@ export async function saveMaterial(pool,{actorToken,idempotencyKey,materialId=nu
     }
     await client.query('INSERT INTO material_events(material_id,actor_id,previous_data,new_data,idempotency_key,request_fingerprint) VALUES ($1,$2,$3,$4,$5,$6)',[id,actorId,old?JSON.stringify(old):null,JSON.stringify(data),idempotencyKey,fingerprint]);
     return {id,replayed:false};
-  });
+  },true);
 }
 export async function listMaterials(pool,{actorToken,search='',active='ALL',offset=0}={}){
   if(typeof search!=='string'||search.length>200||!['ALL','ACTIVE','INACTIVE'].includes(active)||!Number.isInteger(offset)||offset<0||offset>100000)throw new RangeError('Filtro inválido');

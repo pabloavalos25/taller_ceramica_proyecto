@@ -30,11 +30,11 @@ test('recorrido integral: alta, cuota, consumos, pago y cuenta de alumna', async
       await pool.query(await readFile(new URL(file, migrations), 'utf8'));
     }
     await pool.query('DELETE FROM fee_tier_rules');await pool.query('DELETE FROM fee_tier_schedules');
-  const admin = (await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@test.invalid','hash','ADMIN',false) RETURNING id")).rows[0].id;
+  const admin = (await pool.query("INSERT INTO users(email,password_hash,role,must_change_password) VALUES ('admin@test.invalid','hash','ADMIN',false) RETURNING id")).rows[0].id; await pool.query("INSERT INTO admin_profiles(user_id,display_name,access_level) VALUES ($1,'Principal','PRINCIPAL')",[admin]);
     const actorToken = await createSession(pool, admin);
     const { period, today } = (await pool.query("SELECT to_char(now() AT TIME ZONE 'America/Argentina/Buenos_Aires','YYYY-MM') AS period, to_char(now() AT TIME ZONE 'America/Argentina/Buenos_Aires','YYYY-MM-DD') AS today")).rows[0];
     const initialPassword = 'ClaveTemporal2026!';
-    const studentId = await createStudent(pool, { actorToken, fullName:'Lucia Prueba', email:'lucia@test.invalid', phone:'123456', initialPassword, enrolledOn:today, active:true, weekdays:[1], feeStart:'CURRENT', branch:'GODOY_CRUZ' });
+    const studentId = await createStudent(pool, { actorToken, fullName:'Lucia Prueba', email:'lucia@test.invalid', phone:'123456', initialPassword, enrolledOn:today, active:true, weekdays:[1], feeStart:'CURRENT', branch:'GODOY_CRUZ',teacherId:admin });
     await setFeePrice(pool, { actorToken, mode:'INITIAL', amountCents:4000000n });
     await initializeDueDay(pool, { actorToken, day:10 });
     assert.equal((await generatePeriod(pool, period)).created, 1);

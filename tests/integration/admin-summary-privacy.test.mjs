@@ -19,7 +19,14 @@ test('income graph data is provided only to principal and inactive profiles are 
   const p=await getAdminSummary(pool,{actorToken:await createSession(pool,a)});
   const token=await createSession(pool,t); const q=await getAdminSummary(pool,{actorToken:token});
   assert.equal(p.monthlyIncome.length,6);
+  assert.equal(Object.hasOwn(p,'incomeCents'),true);
+  assert.equal(Object.hasOwn(p,'outstandingCents'),true);
+  assert.equal(Object.hasOwn(p,'inconsistent'),true);
   assert.equal(Object.hasOwn(q,'monthlyIncome'),false);
+  assert.equal(Object.hasOwn(q,'incomeCents'),false);
+  assert.equal(Object.hasOwn(q,'outstandingCents'),false);
+  assert.equal(Object.hasOwn(q,'inconsistent'),false);
+  assert.deepEqual(q.recentPayments,[]);
   await pool.query('UPDATE admin_profiles SET active=false WHERE user_id=$1',[t]);
   await assert.rejects(getAdminSummary(pool,{actorToken:token}),/autoriz/i);
  }finally{await pool.end();await root.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);await root.end();}

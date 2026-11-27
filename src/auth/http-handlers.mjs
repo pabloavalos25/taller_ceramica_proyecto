@@ -52,7 +52,7 @@ export function createAuthHandlers({ origin, production, authenticate, revokeSes
         if(!allowed(request))return json({error:'Solicitud no permitida'},403);
         let body;try{body=await readBody(request);}catch{return json({error:'Datos inválidos'},400);}
         if(request.method==='POST'){
-          if(!body||Object.keys(body).some(k=>!['displayName','email','temporaryPassword'].includes(k))||typeof body.displayName!=='string'||typeof body.email!=='string'||typeof body.temporaryPassword!=='string')return json({error:'Datos inválidos'},400);
+          if(!body||Object.keys(body).some(k=>!['displayName','email','temporaryPassword','accessLevel'].includes(k))||typeof body.displayName!=='string'||typeof body.email!=='string'||typeof body.temporaryPassword!=='string'||(body.accessLevel!==undefined&&!['PRINCIPAL','TEACHER'].includes(body.accessLevel)))return json({error:'Datos inválidos'},400);
           const id=await createTeacher({actorToken:token,...body});return json({id},201);
         }
         if(request.method==='DELETE'){

@@ -8,3 +8,6 @@ export function formatPeriod(value) {
   if (!match || match[1] === '0000') return '';
   return `${monthNames[Number(match[2]) - 1]} de ${match[1]}`;
 }
+export function periodHint(kind) {
+  return kind === 'materiales' ? 'Elegí el mes en el que se cobrarán los materiales.' : 'Elegí el mes en el que se cobrará la horneada.';
+}

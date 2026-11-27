@@ -1,8 +1,8 @@
 'use client';
 import {useEffect, useRef, useState} from 'react';
-import {formatPeriod, makePeriod, monthNames} from '../../../../src/kiln/period.mjs';
+import {formatPeriod, makePeriod, monthNames, periodHint} from '../../../../src/kiln/period.mjs';
 
-export default function PeriodPicker({value, onChange}) {
+export default function PeriodPicker({value, onChange, kind}) {
   const [open, setOpen] = useState(false);
   const [year, setYear] = useState(null);
   const container = useRef(null);
@@ -28,6 +28,6 @@ export default function PeriodPicker({value, onChange}) {
       <div className="period-year"><button type="button" disabled={year <= 1} onClick={() => setYear(year - 1)} aria-label="Año anterior">‹</button><strong aria-live="polite">{year}</strong><button type="button" disabled={year >= 9999} onClick={() => setYear(year + 1)} aria-label="Año siguiente">›</button></div>
       <div className="period-months">{monthNames.map((month, index) => <button type="button" key={month} aria-pressed={value === makePeriod(year, index)} onClick={() => {onChange(makePeriod(year, index)); setOpen(false); trigger.current?.focus();}}>{month}</button>)}</div>
     </div>}
-    <p className="period-hint">Elegí el mes en el que se cobrará la horneada.</p>
+    <p className="period-hint">{periodHint(kind)}</p>
   </div>;
 }
